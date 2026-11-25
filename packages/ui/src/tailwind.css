@@ -1,0 +1,110 @@
+/*
+ * Tailwind v4 theme mapped onto the CSS-variable tokens (D-011).
+ * Apps import this after `@import "tailwindcss";` and add `@source` for packages/ui.
+ */
+@import "./themes.css";
+@import "./fonts.css";
+@import "./animations.css";
+
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-overlay: var(--overlay);
+
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-inverse: var(--text-inverse);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+
+  --color-chip: var(--chip);
+  --color-chip-hover: var(--chip-hover);
+  --color-chip-active: var(--chip-active);
+  --color-control-dark: var(--control-dark);
+  --color-on-control-dark: var(--on-control-dark);
+  --color-checkbox-border: var(--checkbox-border);
+  --color-toggle-off: var(--toggle-off);
+  --color-toggle-thumb: var(--toggle-thumb);
+  --color-kbd: var(--kbd);
+  --color-focus-ring: var(--focus-ring);
+  --color-skeleton: var(--skeleton);
+
+  --color-toast: var(--toast);
+  --color-on-toast: var(--on-toast);
+  --color-toast-action: var(--toast-action);
+
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-6: var(--avatar-6);
+  --color-on-avatar: var(--on-avatar);
+
+  --shadow-popover: var(--shadow-popover);
+  --shadow-lifted: var(--shadow-lifted);
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    "Plus Jakarta Sans Variable", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 14px;
+  --radius-popover: 12px;
+  --radius-settings: 16px;
+  --radius-checkbox: 4px;
+
+  --text-meta: 11px;
+  --text-meta--line-height: 14px;
+  --text-secondary: 12px;
+  --text-secondary--line-height: 16px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-details-title: 22px;
+  --text-details-title--line-height: 28px;
+  --text-page-title: 40px;
+  --text-page-title--line-height: 48px;
+  --text-page-title--letter-spacing: -0.02em;
+
+  --ease-out: var(--motion-ease-out);
+  --ease-in-out: var(--motion-ease-in-out);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}

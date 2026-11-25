@@ -19,7 +19,7 @@ Three columns on a tinted canvas:
   2. **Task details mode:** replaces the cover when a task is opened (see §5).
   - Lists without a cover show no right panel, so the main card stretches. Week view also hides the panel and uses the full width.
 - **Sidebar collapse** toggle (panel icon) and **search** (magnifier) sit at the sidebar's top-right.
-- Mobile (< 768px): one column. The sidebar becomes the home screen or drawer, task details become a full-screen sheet, Quick Create is a bottom "+" FAB, and Updates sits in the bottom-right.
+- Mobile (< 768px): one column with a header (menu button, wordmark, search). The sidebar becomes a left drawer, task details become a full-screen sheet, Quick Create is a "+" FAB at the bottom centre, and Updates sits in the bottom-right [assumption: D-027].
 - Tablet (768–1023px): sidebar collapsible, no cover panel, details as an overlay sheet on the right.
 
 ## 2. Typography
@@ -43,6 +43,8 @@ Three columns on a tinted canvas:
 | `--brand-violet` | ≈ `#6E5BD8` | upsell/"new" highlights (Flolist: use for info banners only) |
 | `--success` | ≈ `#3E8E5E` | toggles on, "connected" text |
 | `--chip` | `#ECECF2` | pill buttons and filter chips |
+
+The full token list (both themes) is in `packages/ui/src/themes.css`. Dark values are derived from these [assumption: D-027].
 - **Active sidebar item:** a light grey row background plus a **3px accent bar on the right edge** of the sidebar.
 - Sidebar nav icons are small (16px) line icons in the accent colour, each in a rounded-square glyph style.
 - Shadows are minimal: popovers get a soft large blur shadow (`0 8px 32px rgba(20,20,40,.12)`) and a 12px radius.
@@ -94,7 +96,7 @@ Top to bottom:
 - Implement every duration and curve as constants in `packages/ui/motion.ts` (Motion library for layout and collapse animations; D-011). Never inline magic numbers.
 
 ## 8. Cover images ("dreamscapes")
-- Ship 6–10 built-in calm photos (royalty-free, e.g. Unsplash-licence images placed in `apps/web/public/covers/`, with credits in `docs/credits.md`). Each system view gets a default image; users can upload their own list cover (≤ 25 MB, resized server-side to ~1600px WebP).
+- 8 built-in calm photos ship in `apps/web/public/covers/` (Unsplash License, credits in `docs/credits.md`; D-028). Defaults: Inbox, Today and Updates each get their own image; users can upload their own list cover (≤ 25 MB, resized server-side to ~1600px WebP).
 
 ## 9. Wordmark
 - No logo. Show the text "Flolist" (display font, 18px, bold, accent colour) at the top of the sidebar on the login screen and in the mobile header only. Superlist itself shows no wordmark in the desktop sidebar; Flolist does the same.

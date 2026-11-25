@@ -168,6 +168,32 @@ Decision:
 - testcontainers' transitive install scripts (`cpu-features`, `protobufjs`, `ssh2`) are set to `false` in `allowBuilds`.
 Consequences: `pnpm check` needs Docker running locally.
 
+## D-026 — UI libraries and pinned versions (M0.3)  (2026-11-25 · Accepted)
+Context: M0.3 adds the UI stack named in D-011 and the client libraries from architecture.md, pinned the same way as D-017 (latest stable, older than pnpm's 24 h window).
+Decision: Exact versions:
+- Styling: **tailwindcss 4.3.5** + **@tailwindcss/vite 4.3.5**, **clsx 2.1.1**.
+- Primitives and icons: **radix-ui 1.8.1** (the unified package, imported as `import { Popover } from "radix-ui"`), **lucide-react 1.79.0** (1.80.0 was inside the 24 h window).
+- Motion: **motion 14.14.0** (`motion/react`).
+- Fonts: **@fontsource-variable/inter 5.3.0**, **@fontsource-variable/plus-jakarta-sans 5.3.0** (the `wght.css` axis files).
+- Client state: **@tanstack/react-router 1.170.46**, **@tanstack/react-query 5.108.4**, **zustand 5.1.0**.
+- Tests: **@testing-library/user-event 14.6.13**.
+Consequences: `packages/ui` declares React as a peer dependency, so components there use the app's React.
+
+## D-027 — UI system conventions (M0.3)  (2026-11-25 · Accepted)
+Decision:
+- **Tokens:** `packages/ui/src/themes.css` defines every token per `[data-theme]`; `tailwind.css` maps them into Tailwind with `@theme inline` and resets the default palette (`--color-*: initial`), so a component can only use token colours. A test requires Dark to define exactly Light's tokens and every colour token to be mapped. Light follows ui-design §3; Dark is derived from it `[assumption]` until Superlist's dark palette is measured (Backlog).
+- **Motion:** durations, curves and springs live in `motion.ts`; CSS uses matching `--motion-*` variables (zeroed under `prefers-reduced-motion`), and a test keeps the two in sync. Motion runs under `<MotionConfig reducedMotion="user">`.
+- **Theme:** the preference is cached in localStorage under `flolist.theme` (try/catch) and applied before first paint by an inline script that a small Vite plugin injects from `themeBootScript`. "System preference" follows `prefers-color-scheme` live. It moves onto the user record in M1.1.
+- **Components** live in `packages/ui/src/components` and are consumed as source (D-020); apps add `@source` for that folder. Mount `<UiProvider>` once (tooltips, toasts, motion config). Toasts use an imperative `toast(message, { action })`.
+- **Routing:** TanStack Router with code-based routes (no file-based codegen) `[assumption]`. Each route declares its right panel in `staticData.panel` (`cover` + image id, or none); an open task is detected from the `taskId` param. Unknown settings tabs redirect to Profile.
+- **Breakpoints:** phone < 768px, tablet 768–1023px, desktop ≥ 1024px (Tailwind `md`/`lg`). The cover panel is `clamp(300px, 30vw, 440px)` wide. On phones, the Quick create FAB sits bottom-centre and Updates bottom-right `[assumption]`. Shortcut badges show only on fine pointers.
+- **Week view** starts on Monday until the first-day-of-week setting exists `[assumption]`.
+Consequences: New themes (M6) are token blocks only. Components never take colour props.
+
+## D-028 — Built-in cover images (M0.3)  (2026-11-25 · Accepted)
+Decision: Eight Unsplash photos (Unsplash License, free tier only, no Unsplash+) ship in `apps/web/public/covers/` as 1600px WebP (124–872 KB), with credits in `docs/credits.md`. Defaults: Inbox = misty-mountains, Today = pastel-ocean, Updates = misty-marsh; the rest are for list covers later. Ids live in `apps/web/src/shell/covers.ts`.
+Consequences: Any new built-in cover needs a credits row. Server-side resizing of uploads is still the list-covers phase's job.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

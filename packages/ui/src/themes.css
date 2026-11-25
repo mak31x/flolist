@@ -1,0 +1,146 @@
+/*
+ * Flolist design tokens (D-011, ui-design §3). Components only ever use these variables.
+ * Themes are selected with <html data-theme="…">. M0.3 ships Light and Dark; the other
+ * themes from settings-and-account.md arrive in M6 as additional token sets.
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --canvas: #e4e4ec;
+  --surface: #fafafc;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eeeef3;
+  --surface-hover: #efeff4;
+  --surface-selected: #e9e9f0;
+  --overlay: rgb(20 20 40 / 0.32);
+
+  /* Text */
+  --text: #1f1f2e;
+  --text-muted: #6b6b80;
+  --text-subtle: #8e8ea2;
+  --text-inverse: #fafafc;
+
+  /* Lines */
+  --border: #e2e2ea;
+  --border-strong: #cfcfdb;
+
+  /* Accent (one per screen) */
+  --accent: #e5533d;
+  --accent-hover: #d4432e;
+  --accent-soft: #fbe7e3;
+  --on-accent: #ffffff;
+
+  /* Status */
+  --info: #6e5bd8;
+  --info-soft: #ecebf7;
+  --success: #3e8e5e;
+  --danger: #d43c28;
+
+  /* Controls */
+  --chip: #ececf2;
+  --chip-hover: #e2e2ea;
+  --chip-active: #d6d6e1;
+  --control-dark: #2a2a3a;
+  --on-control-dark: #fafafc;
+  --checkbox-border: #b9b9c8;
+  --toggle-off: #d6d6e1;
+  --toggle-thumb: #ffffff;
+  --kbd: #e6e6ee;
+  --focus-ring: #6e5bd8;
+  --skeleton: #e3e3eb;
+
+  /* Toast */
+  --toast: #24243a;
+  --on-toast: #f2f2f7;
+  --toast-action: #ff8f7d;
+
+  /* Avatar fallbacks */
+  --avatar-1: #e5533d;
+  --avatar-2: #6e5bd8;
+  --avatar-3: #3e8e5e;
+  --avatar-4: #d08a1e;
+  --avatar-5: #2f80c2;
+  --avatar-6: #c0468a;
+  --on-avatar: #ffffff;
+
+  --shadow-popover: 0 8px 32px rgb(20 20 40 / 0.12), 0 1px 2px rgb(20 20 40 / 0.06);
+  --shadow-lifted: 0 6px 20px rgb(20 20 40 / 0.14);
+}
+
+/* [assumption] Dark values are derived from Light; Superlist's dark palette was not measured. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #111117;
+  --surface: #1b1b23;
+  --surface-raised: #24242e;
+  --surface-sunken: #20202a;
+  --surface-hover: #262631;
+  --surface-selected: #2c2c38;
+  --overlay: rgb(0 0 0 / 0.5);
+
+  --text: #ededf3;
+  --text-muted: #a3a3b5;
+  --text-subtle: #75758a;
+  --text-inverse: #1b1b23;
+
+  --border: #2e2e3a;
+  --border-strong: #3e3e4c;
+
+  --accent: #f0644e;
+  --accent-hover: #f67a66;
+  --accent-soft: #3b2420;
+  --on-accent: #ffffff;
+
+  --info: #9787f0;
+  --info-soft: #2a2740;
+  --success: #57b37c;
+  --danger: #f06a55;
+
+  --chip: #2a2a35;
+  --chip-hover: #33333f;
+  --chip-active: #41414f;
+  --control-dark: #ededf3;
+  --on-control-dark: #1b1b23;
+  --checkbox-border: #5c5c6e;
+  --toggle-off: #41414f;
+  --toggle-thumb: #ffffff;
+  --kbd: #30303c;
+  --focus-ring: #9787f0;
+  --skeleton: #2c2c37;
+
+  --toast: #33333f;
+  --on-toast: #f2f2f7;
+  --toast-action: #ff8f7d;
+
+  --avatar-1: #d9503b;
+  --avatar-2: #7a68e0;
+  --avatar-3: #3f9563;
+  --avatar-4: #c4831f;
+  --avatar-5: #3485c7;
+  --avatar-6: #c24c8d;
+  --on-avatar: #ffffff;
+
+  --shadow-popover: 0 8px 32px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-lifted: 0 6px 20px rgb(0 0 0 / 0.5);
+}
+
+/* Motion (values mirror motion.ts; motion.test.ts checks them). */
+:root {
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --motion-collapse: 220ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-collapse: 0ms;
+  }
+}
