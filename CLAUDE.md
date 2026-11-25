@@ -25,7 +25,7 @@ Never `@import` the spec files into this file. That would load them in every ses
 - **API** `apps/api`: Node + Hono, REST + WebSocket for live sync, zod schemas shared via `packages/shared`.
 - **Auth:** Better Auth (email/password + Google OAuth, sessions in Postgres, organization plugin = teams; bearer tokens for native apps).
 - **DB:** PostgreSQL + Drizzle ORM/migrations. **Jobs:** pg-boss in `apps/worker` (reminders, push, email, digests).
-- **Files:** S3-compatible storage (MinIO in dev, OCI Object Storage in prod).
+- **Files:** S3-compatible storage (RustFS in dev per D-018, OCI Object Storage in prod).
 - **Native shells:** `apps/desktop` (Tauri 2: macOS, Windows) and `apps/mobile` (Capacitor: Android, iOS) load the same web build. Platform APIs go through `apps/web/src/platform/` adapters.
 - **Deploy:** Docker Compose on Oracle Ampere A1. **All images must be linux/arm64.** Caddy handles TLS and the reverse proxy. Nightly `pg_dump`.
 - Pin the latest stable versions at scaffold time and record them in decisions.md. Never guess an API: check the library docs when unsure.
@@ -45,9 +45,10 @@ docs/           roadmap, decisions, architecture, deploy, spec/*
 ```
 
 ## Commands (keep these up to date)
-- `pnpm dev`: web + api + worker, with `infra/docker-compose.dev.yml` (postgres, minio, mailpit)
-- `pnpm check`: lint + typecheck + unit/integration tests · `pnpm test:e2e`: Playwright
-- `pnpm db:generate` / `pnpm db:migrate` / `pnpm db:seed`
+- `pnpm dev`: web (:5174) + api (:3000) + worker, after starting `infra/docker-compose.dev.yml` (postgres, rustfs, mailpit). Copy `.env.example` to `.env` first
+- `pnpm infra:up` / `pnpm infra:down`: only the Docker services · `pnpm format`: Prettier write
+- `pnpm check`: prettier check + lint + typecheck + unit/integration tests (CI runs it on PRs) · `pnpm test:e2e`: Playwright (added in M1.1)
+- `pnpm db:generate` / `pnpm db:migrate` / `pnpm db:seed` (added in M0.2)
 - Later: `pnpm desktop:dev` (Tauri), `pnpm mobile:android` (Capacitor)
 
 ## Non-negotiable rules

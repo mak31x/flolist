@@ -12,7 +12,7 @@ Caddy (TLS · static web build · reverse proxy /api and /ws)
    ├── api      Hono on Node: REST, Better Auth, WebSocket hub, presigned file URLs
    ├── worker   pg-boss: reminders, push/email, digests, integrations
    ├── postgres single source of truth (+ pg-boss tables)
-   └── object storage (MinIO dev / OCI Object Storage prod)
+   └── object storage (RustFS dev / OCI Object Storage prod)
 ```
 
 ## Packages
@@ -72,7 +72,7 @@ Caddy (TLS · static web build · reverse proxy /api and /ws)
 - Row access is checked in the service layer, not with Postgres RLS. Keep it simple and test it well, using the permission fixtures.
 
 ## Environments
-- `dev`: `pnpm dev` + `infra/docker-compose.dev.yml` (postgres, minio, mailpit).
+- `dev`: `pnpm dev` + `infra/docker-compose.dev.yml` (postgres, rustfs, mailpit).
 - `prod`: `infra/docker-compose.prod.yml` on Oracle (deploy-oracle.md). An optional `staging` compose project on the same VM under `staging.`.
 
 ## Conventions

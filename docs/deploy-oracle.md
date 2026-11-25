@@ -4,7 +4,7 @@ Read this in M0.4 (first deploy) and M8 (hardening). Update it whenever the real
 
 ## Target
 - Ampere A1 Flex VM. Always Free allows up to 4 OCPU / 24 GB RAM in total across A1 instances; check the current limits in the OCI console. OS: Ubuntu 24.04 LTS (aarch64).
-- Budget for Flolist: about 2 OCPU and 2–4 GB RAM. Postgres needs about 1 GB, api + worker about 0.5 GB, and Caddy/MinIO are small.
+- Budget for Flolist: about 2 OCPU and 2–4 GB RAM. Postgres needs about 1 GB, api + worker about 0.5 GB, and Caddy and an optional S3 server are small.
 - If you reuse the VM that runs n8n (Q-3), put **one** reverse proxy in front of both: either Caddy for both, or a Flolist site block added to the existing proxy. Never run two proxies on ports 80/443.
 
 ## One-time server setup
@@ -23,7 +23,7 @@ Read this in M0.4 (first deploy) and M8 (hardening). Update it whenever the real
 | api | ghcr.io/<owner>/flolist-api:<sha> | `NODE_ENV=production`; healthcheck `/api/health` |
 | worker | ghcr.io/<owner>/flolist-worker:<sha> | can share the api image with a different command |
 | postgres | postgres:17 (or current stable) | volume `pgdata`; `shared_buffers=256MB` |
-| minio *(optional)* | minio/minio | only if not using OCI Object Storage |
+| s3 *(optional)* | rustfs/rustfs (D-018; MinIO no longer ships images) | only if not using OCI Object Storage |
 
 Images are multi-stage `node:<lts>-slim` builds using `pnpm deploy --prod` for a minimal `node_modules`, targeting `linux/arm64`.
 

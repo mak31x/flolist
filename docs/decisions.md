@@ -80,7 +80,7 @@ Decision:
 
 Consequences: All 14 themes (plus "System preference") are token sets only.
 
-## D-012 — Notifications, email, files  (2026-11-24 · Accepted)
+## D-012 — Notifications, email, files  (2026-11-24 · Accepted; dev object storage superseded by D-018)
 Decision:
 - **Push:** Web Push (VAPID) for the web/PWA. FCM for Android (and iOS via APNs) through the Capacitor push plugin. Native notifications in Tauri via its notification plugin. The worker picks the channel per device.
 - **Email:** SMTP via Nodemailer, with the provider set by env (Mailpit in dev).
@@ -105,6 +105,37 @@ Decision:
 - The per-user **workspace visibility toggles** filter by the list's *owner workspace* only.
 
 Full details, including member-side rules we decided ourselves, are in spec/collaboration.md.
+
+## D-017 — Toolchain and pinned versions (M0.1)  (2026-11-25 · Accepted)
+Context: M0.1 pins the latest stable version of every tool at scaffold time, checked against the npm registry, Docker Hub and the GitHub releases.
+Decision: Exact versions, no ranges:
+- Runtime and package manager: Node 26 LTS (`.nvmrc`, `engines >=26 <27`), pnpm 12.23.0 (`packageManager`), Turborepo 2.11.13.
+- **TypeScript 6.0.3**, not 7.0.2. typescript-eslint 8.74.0 supports only `typescript <6.1.0`; TS 7 (native) works only with the 7.1 dev builds through `@typescript/native`. Move to TS 7 once typescript-eslint supports a stable release (Backlog).
+- Lint, format, test: ESLint 10.15.0 (flat config, `typescript-eslint` strictTypeChecked, react-hooks 7.1.1, react-refresh 0.5.8), Prettier 3.10.1, Vitest 5.1.1, jsdom 31.0.1, Testing Library (react 16.3.3, dom 10.4.2, jest-dom 8.0.0).
+- Web: React 19.3.1, Vite 8.3.8, @vitejs/plugin-react 6.3.0.
+- API and worker: Hono 4.13.21, @hono/node-server 2.1.11, zod 4.6.7, tsx 4.23.15 (dev runner).
+- Types: @types/node 26.6.6, @types/react 19.3.0, @types/react-dom 19.3.0.
+- Docker images: postgres:19.0-alpine, rustfs/rustfs:1.0.6, amazon/aws-cli:2.42.3 (bucket init), axllent/mailpit:v1.34.0. All are multi-arch with arm64.
+- CI actions: actions/checkout@v7, pnpm/action-setup@v6, actions/setup-node@v7.
+- pnpm's default `minimumReleaseAge` (24 h) stays on. hono, @types/node and @types/react were pinned to the newest release older than that window instead of being excluded. `allowBuilds: { esbuild: true }` in pnpm-workspace.yaml (for tsx).
+Consequences: Libraries the roadmap names for later phases (TanStack, Tailwind, Radix, Drizzle, Better Auth, pg-boss…) get pinned in the phase that adds them, in the same way.
+
+## D-018 — Dev object storage: RustFS instead of MinIO  (2026-11-25 · Accepted · Supersedes D-012 for dev object storage only)
+Context: MinIO no longer publishes official images (`minio/minio` is gone from Docker Hub and Quay), and the Bitnami image is gone too.
+Decision: Dev S3 is **RustFS** (`rustfs/rustfs`, Apache-2.0, S3-compatible, with a web console), set through `S3_*` env vars. A one-shot `rustfs-init` service (aws-cli, compose profile `init`) creates the bucket. Prod is unchanged (OCI Object Storage), and `minio` in D-010's optional prod service list now means "any S3-compatible server".
+Alternatives: the pgsty/minio community rebuild (third-party, may go stale), and Garage (needs a layout/key setup, no console).
+Consequences: App code must stay S3-generic (AWS SDK v3 with a custom endpoint and path-style addressing) and never use MinIO-specific APIs.
+
+## D-019 — Local dev ports and env  (2026-11-25 · Accepted)
+Decision: One `.env` at the repo root, read by every app (Vite via `loadEnv(envDir)`, Node apps via `--env-file-if-exists`) and by compose (`--project-directory .`). Default host ports are offset so Flolist can run next to other local stacks: web 5174, api 3000, Postgres 5433, S3 9010 (console 9011), SMTP 1026, Mailpit UI 8026. In dev, Vite proxies `/api` and `/ws` to the API, so the browser stays same-origin as it will be behind Caddy in prod.
+
+## D-020 — Workspace conventions (M0.1)  (2026-11-25 · Accepted)
+Decision:
+- Internal packages (`@flolist/*`) are consumed as TypeScript source through `exports` (with no build step), and imports use explicit `.ts` extensions (`allowImportingTsExtensions`, `verbatimModuleSyntax`). Production bundling is settled in M0.4.
+- One shared `tsconfig.base.json` is strict, with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`, and one root `eslint.config.js`.
+- Each package has its own `lint`/`typecheck`/`test` scripts, run by Turborepo.
+- `pnpm check` = `prettier --check .` + `turbo run lint typecheck test`. CI runs it on PRs and on pushes to main.
+- Playwright e2e is added to CI with the first critical flow (M1.1).
 
 ---
 
