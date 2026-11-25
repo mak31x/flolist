@@ -221,11 +221,17 @@ Decision:
 - Backups: `pg_dump -Fc -Z 6` (no extra gzip) nightly at 02:30 UTC to `/opt/flolist/backups`, 14 daily + 8 weekly (hard links). `restore-test.sh` runs monthly against a throwaway database. They stay on the VM until M8.3 moves them offsite.
 Consequences: A broken migration needs a manual fix-forward. The VM's disk holds the only backup copy until M8.3 (Backlog risk).
 
+## D-032 — Production email: Hostinger SMTP  (2026-11-25 · Accepted)
+Context: Q-2. The owner already has Hostinger mail for levitatinglabs.com.
+Decision: Production mail goes through **Hostinger SMTP**: `smtp.hostinger.com:465` with implicit TLS (Nodemailer `secure: true`), authenticated as a Hostinger mailbox on levitatinglabs.com. The provider stays env-only (`SMTP_HOST/PORT/USER/PASS`, `MAIL_FROM`), per D-012, so a switch is a config change. Dev keeps Mailpit.
+Alternatives: transactional APIs (Resend, Brevo, SES): better deliverability and analytics, but a new account and DNS setup for little volume today.
+Consequences: Hostinger mailboxes have daily sending caps, which is fine for single-user/small-team volume; revisit (Backlog) before company-wide use or digest emails at scale. SPF/DKIM/DMARC for levitatinglabs.com must stay correct, and if DNS moves to Cloudflare the MX, SPF, DKIM and DMARC records must be copied over. The owner puts the mailbox password into `/opt/flolist/.env` on the VM themselves. Port 465 is not blocked by OCI (only 25 is).
+
 ---
 
 ## Open questions (resolve, then turn into decisions)
 - ~~Q-1: Production domain~~ → resolved in D-029.
-- Q-2: SMTP provider (Brevo, Resend, Zoho, Amazon SES…)? → needed in M1.1.
+- ~~Q-2: SMTP provider~~ → resolved in D-032 (Hostinger).
 - ~~Q-3: Share the Oracle VM with n8n?~~ → resolved in D-029 (shared).
 - Q-4: Should the MCP-server equivalent (which lets AI assistants use Flolist) be built? It's AI-adjacent, so it's parked in the backlog unless approved.
 - Q-5: An Apple Developer account ($99/yr) is needed to sign and notarize the macOS Tauri app (and later iOS) → needed in M10. Local unsigned builds work until then.
