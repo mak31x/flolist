@@ -24,7 +24,7 @@ Read this in M0.4 (first deploy) and M8 (hardening). Update it whenever the real
 
 ## CI/CD setup (one time)
 1. Repo → Settings → Environments → `production`. Add the secrets `DEPLOY_HOST` (130.210.26.170), `DEPLOY_USER` (`deploy`), `DEPLOY_SSH_KEY` (the CI private key) and `DEPLOY_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 130.210.26.170`, checked against the VM's real host key), plus the variable `APP_URL`.
-2. After the first image push: GitHub → Packages → `flolist-api` → Package settings → visibility **Public**, so the VM can pull without a token.
+2. GHCR: `flolist-api` came out **public** on the first push (it inherits the public repo's visibility), so the VM pulls without a token. Check it with `curl -s "https://ghcr.io/token?scope=repository:mak31x/flolist-api:pull"` (a token comes back = public). If it ever shows as private: GitHub → Packages → `flolist-api` → Package settings → Public.
 3. Workflows: `check.yml` runs on PRs; `deploy.yml` runs on every push to main (check → arm64 image on `ubuntu-24.04-arm` + web bundle → `deploy.sh` over SSH → public health check). A failed health check on the VM rolls back to the previous image and web build.
 
 ## Target

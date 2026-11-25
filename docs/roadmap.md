@@ -4,12 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M0.3 App shell + design tokens (done).
-- **State:** `packages/ui` has the Light/Dark tokens (`themes.css`, mapped to Tailwind in `tailwind.css`), Fontsource fonts, `motion.ts`, the theme helpers (`theme.ts`, including a pre-paint boot script), `shortcuts.ts` and 14 components (D-027). `apps/web` has the three-column `AppShell` (sidebar · main card · cover or task-details panel), the tablet/phone layouts, code-based TanStack Router routes for every view (placeholders), and 8 Unsplash covers (`public/covers`, credits in `docs/credits.md`).
-- **Run:** `pnpm dev` (or just `pnpm --filter @flolist/web dev`), then open http://localhost:5174. The theme switch is at Settings → Features. `pnpm check` covers ui and web with Vitest + Testing Library.
-- **Gotchas:** Tailwind v4 resets the colour palette (`--color-*: initial`), so only token colours exist; there's no `bg-white`. Never put a literal colour in a component. A route's right panel comes from `staticData.panel`, and an open task is detected from the `taskId` param. `matchMedia`, `ResizeObserver` and `scrollTo` are stubbed in the test setups. Create, New task, Sign out and the phone "+" are disabled placeholders; Search does nothing yet. The web bundle is 614 KB, which triggers Vite's size warning.
-- **Next:** M0.4 (CI/CD + first deploy to Oracle). Answer Q-1 (domain) and Q-3 (shared VM?) first.
-- **In M1.1:** add `session`, `account`, `verification`, `invitation`; run Better Auth with `advanced.database.generateId: false` (D-022); move the theme preference onto the user record.
+- **Last phase:** M0.4 CI/CD + first deploy to Oracle (done). Live at **https://flolist.levitatinglabs.com** (the shell; no auth yet).
+- **State:** every push to main runs `.github/workflows/deploy.yml`: check → native arm64 image `ghcr.io/mak31x/flolist-api:<sha>` (esbuild bundles, D-030) + web bundle → rsync + `infra/scripts/deploy.sh` on the VM (migrate, atomic `web-releases/current` switch, health check, auto-rollback; D-031). The VM is shared with n8n + leadfest; the n8n stack's Caddy is the front proxy and forwards to Flolist's Caddy (`flolist-web` on `n8n-docker_default`, D-029). Backups: nightly cron to `/opt/flolist/backups`.
+- **Verify:** `curl https://flolist.levitatinglabs.com/api/health`; on the VM `cat /opt/flolist/.image-tag`. SSH: `ssh flolist-vm` (owner's sudo user), CI uses `deploy`. Runbook: docs/deploy-oracle.md → Current production setup.
+- **Gotchas:** migrations are forward-only and must work with the previous release. Front-proxy edits go in `/home/ubuntu/n8n-docker/Caddyfile`, in place (single-file bind mount), then `caddy reload`. New prod env vars go into `/opt/flolist/.env` on the VM **and** `infra/prod.env.example`. `deploy.sh` and `backup.sh` use GNU tools (`mv -T`, `find -printf`), so they won't run on macOS. Bots scan the domain constantly; that's expected.
+- **Next:** M1.1 (Better Auth). Answer Q-2 (SMTP provider) first. Prod auth needs `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL` (+ Google OAuth keys) in `/opt/flolist/.env`, and the Google redirect URI on flolist.levitatinglabs.com.
+- **In M1.1:** add `session`, `account`, `verification`, `invitation`; run Better Auth with `advanced.database.generateId: false` (D-022); move the theme preference onto the user record; add Playwright e2e to CI.
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -35,10 +35,10 @@ Specs: spec/ui-design.md, spec/settings-and-account.md (themes list only)
 - [x] Base components (Pill/Chip, IconButton, SegmentedTabs, KbdHint, Popover, Menu, Dialog, Toast, EmptyState, SkeletonSquiggle, Avatar/AvatarStack, Toggle, animated Checkbox)
 Done when: the shell matches ui-design §1 at 1440px and 375px.
 
-### M0.4 CI/CD + first deploy to Oracle `[~]`
+### M0.4 CI/CD + first deploy to Oracle `[x]`
 Specs: deploy-oracle.md
-- [ ] arm64 image build + GHCR push; docker-compose.prod.yml + Caddyfile; server setup done (document any deviations)
-- [ ] Deploy job with migrations + health check; nightly backup script
+- [x] arm64 image build + GHCR push; docker-compose.prod.yml + Caddyfile; server setup done (document any deviations)
+- [x] Deploy job with migrations + health check; nightly backup script
 Done when: `https://app.<domain>` serves the shell over HTTPS and every merge redeploys it.
 
 ## M1 — Auth and profile
@@ -142,6 +142,9 @@ Done when (M4): a full day of work is possible without the mouse.
 - Add Playwright e2e (`pnpm test:e2e`) to the CI workflow once the first critical flow exists (M1.1 sign-up)
 - Move to TypeScript 7 (native) once typescript-eslint supports it (D-017)
 - Move the rate limiter to Postgres/Redis if the API ever runs on more than one node (D-023)
-- Code-split the web bundle (route-level lazy imports) — 614 KB after M0.3; settle with production bundling in M0.4/M4
+- Code-split the web bundle (route-level lazy imports) — 614 KB after M0.3; M0.4 didn't change it, so settle in M4 or M8.2
 - Cover settings (gear button on the cover panel: choose a built-in cover or upload one) — with list covers
 - Measure Superlist's real Dark palette and adjust the derived Dark tokens (D-027)
+- Worker healthcheck in docker-compose.prod.yml once pg-boss runs jobs (M5); today it only stays alive
+- Automate the front-proxy site block (it lives in the n8n stack's Caddyfile, D-029) if more Flolist hostnames appear (staging, app.flolist.com)
+- Let the VM pull from GHCR with a read-only token instead of a public package, if the repo ever goes private (D-030)
