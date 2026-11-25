@@ -35,7 +35,7 @@ Specs: spec/ui-design.md, spec/settings-and-account.md (themes list only)
 - [x] Base components (Pill/Chip, IconButton, SegmentedTabs, KbdHint, Popover, Menu, Dialog, Toast, EmptyState, SkeletonSquiggle, Avatar/AvatarStack, Toggle, animated Checkbox)
 Done when: the shell matches ui-design §1 at 1440px and 375px.
 
-### M0.4 CI/CD + first deploy to Oracle `[ ]`
+### M0.4 CI/CD + first deploy to Oracle `[~]`
 Specs: deploy-oracle.md
 - [ ] arm64 image build + GHCR push; docker-compose.prod.yml + Caddyfile; server setup done (document any deviations)
 - [ ] Deploy job with migrations + health check; nightly backup script

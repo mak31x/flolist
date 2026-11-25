@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
+    "build": "node ../../scripts/bundle-node.mjs api=src/index.ts migrate=src/migrate.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"

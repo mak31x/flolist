@@ -1,0 +1,112 @@
+# Production stack on the Oracle Ampere VM (docs/deploy-oracle.md). Lives in /opt/flolist next to
+# `.env` (chmod 600) and is driven only by the deploy job:
+#   IMAGE_TAG=<sha> docker compose -f docker-compose.prod.yml up -d --wait
+# All images are linux/arm64. RAM budget ≈ 2 GB (D-010): the VM also runs n8n and other sites.
+name: flolist
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+x-server: &server
+  image: ghcr.io/mak31x/flolist-api:${IMAGE_TAG:?set IMAGE_TAG}
+  restart: unless-stopped
+  logging: *logging
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: postgres://${POSTGRES_USER:-flolist}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-flolist}
+  depends_on:
+    postgres: { condition: service_healthy }
+
+services:
+  # Serves the web build and proxies /api and /ws over plain HTTP. The VM's front proxy (the n8n
+  # stack's Caddy, which owns 80/443 and terminates TLS) reaches it as `flolist-web:80` on the
+  # shared FRONT_PROXY_NETWORK, the same way app.leadfest.in is wired (docs/deploy-oracle.md).
+  # The loopback port is only for the deploy job's health check.
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "${CADDY_BIND_HTTP:-127.0.0.1:8088}:80"
+    environment:
+      CADDY_SITE: ${CADDY_SITE:-:80}
+    networks:
+      default:
+      front:
+        aliases: [flolist-web]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # web-releases/<sha>/ plus a `current` symlink, switched atomically by the deploy job.
+      - ./web-releases:/srv/releases:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api: { condition: service_healthy }
+    deploy:
+      resources: { limits: { memory: 128m } }
+
+  api:
+    <<: *server
+    command: ["node", "dist/api.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-flolist}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-flolist}
+      API_HOST: 0.0.0.0
+      API_PORT: "3000"
+      TRUST_PROXY: "true"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources: { limits: { memory: 512m } }
+
+  worker:
+    <<: *server
+    command: ["node", "dist/worker.js"]
+    deploy:
+      resources: { limits: { memory: 256m } }
+
+  # One-shot, run by the deploy job before `up`: `docker compose run --rm migrate`.
+  migrate:
+    <<: *server
+    command: ["node", "dist/migrate.js"]
+    restart: "no"
+    profiles: ["migrate"]
+
+  postgres:
+    image: postgres:19.0-alpine
+    restart: unless-stopped
+    logging: *logging
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "max_connections=50"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-flolist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-flolist}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources: { limits: { memory: 1g } }
+
+networks:
+  front:
+    external: true
+    name: ${FRONT_PROXY_NETWORK:-n8n-docker_default}
+
+volumes:
+  pgdata:
+  caddy-data:
+  caddy-config:

@@ -49,6 +49,7 @@ docs/           roadmap, decisions, architecture, deploy, spec/*
 - `pnpm infra:up` / `pnpm infra:down`: only the Docker services · `pnpm format`: Prettier write
 - `pnpm check`: prettier check + lint + typecheck + unit/integration tests (CI runs it on PRs; API tests start a Postgres container, so Docker must be running) · `pnpm test:e2e`: Playwright (added in M1.1)
 - `pnpm db:generate` (drizzle-kit SQL migration from the schema) / `pnpm db:migrate` / `pnpm db:seed` (deterministic, rerunnable)
+- Deploy: every merge to `main` runs `.github/workflows/deploy.yml` (arm64 image → VM, with auto-rollback). Runbook: docs/deploy-oracle.md
 - Later: `pnpm desktop:dev` (Tauri), `pnpm mobile:android` (Capacitor)
 
 ## Non-negotiable rules

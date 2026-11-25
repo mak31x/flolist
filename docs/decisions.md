@@ -58,7 +58,7 @@ Decision: Everything the user can reorder (blocks, sidebar entries, sections, In
 ## D-009 — Recurrence with RFC 5545 RRULE  (2026-11-24 · Accepted)
 Decision: Store `recurrence_rule` (an RRULE string) and `recurrence_anchor` ('due' | 'completion'; default 'due', matching Superlist). Completing a recurring task logs a row in `task_completions` and moves the same task to its next due date. Its details are kept and its subtasks are reset to incomplete `[assumption]`. Helpers live in `packages/shared/recurrence` (using `rrule`) and are used by both web and api.
 
-## D-010 — Hosting: Oracle Always-Free Ampere A1, Docker Compose, Caddy  (2026-11-24 · Accepted)
+## D-010 — Hosting: Oracle Always-Free Ampere A1, Docker Compose, Caddy  (2026-11-24 · Accepted; TLS/front proxy superseded by D-029)
 Decision: One VM (Ampere A1, arm64, Ubuntu LTS). Compose services:
 - `caddy` (TLS, serves the static web build, proxies `/api` and `/ws`)
 - `api`
@@ -194,12 +194,39 @@ Consequences: New themes (M6) are token blocks only. Components never take colou
 Decision: Eight Unsplash photos (Unsplash License, free tier only, no Unsplash+) ship in `apps/web/public/covers/` as 1600px WebP (124–872 KB), with credits in `docs/credits.md`. Defaults: Inbox = misty-mountains, Today = pastel-ocean, Updates = misty-marsh; the rest are for list covers later. Ids live in `apps/web/src/shell/covers.ts`.
 Consequences: Any new built-in cover needs a credits row. Server-side resizing of uploads is still the list-covers phase's job.
 
+## D-029 — Production host, domain and front proxy (M0.4)  (2026-11-25 · Accepted · Supersedes D-010 for TLS and the front proxy only)
+Context: Q-1 and Q-3. The owner's existing Ampere VM (2 OCPU, 11 GB) already runs n8n and app.leadfest.in behind the n8n stack's Caddy, which owns 80/443.
+Decision:
+- Production is **https://flolist.levitatinglabs.com** on that shared VM. If the owner buys flolist.com, `app.flolist.com` replaces it: a DNS record, a front-proxy site block and `APP_URL`.
+- DNS: a plain A record, DNS-only. No Cloudflare Tunnel.
+- The **n8n stack's Caddy is the single front proxy** and terminates TLS. Flolist's own Caddy (it serves the SPA and routes `/api` and `/ws`) has no public port. It joins the external `n8n-docker_default` network as `flolist-web`, the same way leadfest is wired. Its loopback port 127.0.0.1:8088 is only for the deploy health check.
+- A `deploy` user (CI key only, `restrict`ed, in the `docker` group) owns `/opt/flolist`. The `ubuntu` user does the one-time setup.
+Alternatives: Flolist's Caddy taking over 80/443 (it would have to absorb the other sites' config); a Cloudflare Tunnel (not needed since the ports are already open).
+Consequences: Front-proxy edits touch n8n and leadfest, so they are rare, made in place (single-file bind mount) and reloaded gracefully. The docker group makes `deploy` root-equivalent on the host, which is accepted for a CI-only key. The real setup is in deploy-oracle.md → Current production setup.
+
+## D-030 — Production build and image (M0.4)  (2026-11-25 · Accepted)
+Context: D-020 left production bundling to M0.4. Internal packages are TypeScript source, and Node refuses to strip types inside `node_modules`.
+Decision:
+- `scripts/bundle-node.mjs` (**esbuild 0.28.2**, a root dev dependency) bundles the api (`api.js`, `migrate.js`) and the worker (`worker.js`) into self-contained ESM files, npm dependencies included, with a `createRequire` banner. `pg-native` and `pino-pretty` stay external.
+- **One image** `ghcr.io/mak31x/flolist-api:<sha>` (plus `latest`) on **node:26.13.1-slim** runs all three with different commands. It has no `node_modules`; migrations are copied to `/app/migrations`, where the bundled `@flolist/db` looks for them. It is built natively on GitHub's `ubuntu-24.04-arm` runner (free for public repos), with no QEMU.
+- Pinned prod images: **caddy:2.11.9-alpine** and postgres:19.0-alpine (the same as dev). The GHCR package is public, so the VM pulls without a token.
+- New CI actions: docker/setup-buildx-action@v4, docker/login-action@v4, docker/build-push-action@v7, actions/upload-artifact@v7, actions/download-artifact@v8.
+Alternatives: `pnpm deploy --prod` + tsx at runtime (a larger image, and the TS compiler in prod); a separate worker image (it would duplicate an identical build).
+
+## D-031 — Deploy pipeline and backups (M0.4)  (2026-11-25 · Accepted)
+Decision:
+- `check.yml` runs on PRs and is a reusable workflow. `deploy.yml` (push to main, or manual) runs check → image + web bundle → deploy in the GitHub environment `production`. The secrets are `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` and `DEPLOY_KNOWN_HOSTS` (a pinned host key), plus the variable `APP_URL`. Deploys never overlap or get cancelled.
+- The deploy job rsyncs the web build to `web-releases/<sha>`, plus the compose file, Caddyfile and scripts, then runs `scripts/deploy.sh <sha>` on the VM. That script pulls, runs `migrate`, switches the `current` symlink atomically, runs `up -d --wait` and `caddy reload`, and checks `/api/health` and `/` through Caddy. On failure it restores the previous image tag and web release. The job ends with a public health check. Five web releases are kept.
+- **Migrations are forward-only**: each one must work with the previous release (expand/contract). They are never rolled back automatically.
+- Backups: `pg_dump -Fc -Z 6` (no extra gzip) nightly at 02:30 UTC to `/opt/flolist/backups`, 14 daily + 8 weekly (hard links). `restore-test.sh` runs monthly against a throwaway database. They stay on the VM until M8.3 moves them offsite.
+Consequences: A broken migration needs a manual fix-forward. The VM's disk holds the only backup copy until M8.3 (Backlog risk).
+
 ---
 
 ## Open questions (resolve, then turn into decisions)
-- Q-1: Production domain, e.g. `app.flolist.<tld>` or a subdomain of an existing domain? → needed in M0.4.
+- ~~Q-1: Production domain~~ → resolved in D-029.
 - Q-2: SMTP provider (Brevo, Resend, Zoho, Amazon SES…)? → needed in M1.1.
-- Q-3: Share the Oracle VM with n8n, or use a separate Always-Free VM? → needed in M0.4.
+- ~~Q-3: Share the Oracle VM with n8n?~~ → resolved in D-029 (shared).
 - Q-4: Should the MCP-server equivalent (which lets AI assistants use Flolist) be built? It's AI-adjacent, so it's parked in the backlog unless approved.
 - Q-5: An Apple Developer account ($99/yr) is needed to sign and notarize the macOS Tauri app (and later iOS) → needed in M10. Local unsigned builds work until then.
 - Q-6: A Firebase project for FCM (Android/iOS push) → needed in M11.
