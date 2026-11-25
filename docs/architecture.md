@@ -28,8 +28,8 @@ Caddy (TLS · static web build · reverse proxy /api and /ws)
 - Base path `/api/v1`. Resources: `/workspaces`, `/teams/:id/members|invitations`, `/lists`, `/lists/:id/blocks`, `/lists/:id/share`, `/lists/:id/move`, `/tasks`, `/tasks/:id/messages`, `/labels`, `/sections`, `/sidebar`, `/inbox`, `/views/today|week|tasks`, `/notifications`, `/trash`, `/search`, `/uploads`, `/me/settings`. Better Auth is mounted at `/api/auth/*`.
 - Every mutation body includes a `clientMutationId` (idempotency, unique per user for 24 h), and updates also send a `baseVersion`. The response is the updated entity with its new `version`.
 - PATCH is field-level: send only the changed fields. On a version mismatch the server applies the non-conflicting fields, uses last-write-wins for the rest, and returns the merged entity.
-- Errors look like `{ error: { code, message, details? } }`, with codes `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `VALIDATION`, `CONFLICT`, `LIMIT`.
-- Authorization: every handler calls `authorize(ctx.user, action, resource)`, which resolves access as described in data-model.md "Access resolution".
+- Errors look like `{ error: { code, message, details?, requestId? } }`, with codes `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `VALIDATION`, `CONFLICT`, `LIMIT`, `RATE_LIMITED` and `INTERNAL`. Statuses and the `details` format are in D-021.
+- Authorization: every handler that touches a resource calls `authorize(db, user, action, resource)`, which resolves access as described in data-model.md "Access resolution" (no access → NOT_FOUND, visible but not allowed → FORBIDDEN; D-024). Collection routes scope their query to the caller instead.
 - Activity and change events: a single `recordActivity()` and `emitChange()` write `activity_events` and an `outbox` row in the same transaction as the mutation. The outbox is drained to WebSocket channels after commit.
 
 ## Live sync (WebSocket)

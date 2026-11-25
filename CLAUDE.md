@@ -47,8 +47,8 @@ docs/           roadmap, decisions, architecture, deploy, spec/*
 ## Commands (keep these up to date)
 - `pnpm dev`: web (:5174) + api (:3000) + worker, after starting `infra/docker-compose.dev.yml` (postgres, rustfs, mailpit). Copy `.env.example` to `.env` first
 - `pnpm infra:up` / `pnpm infra:down`: only the Docker services · `pnpm format`: Prettier write
-- `pnpm check`: prettier check + lint + typecheck + unit/integration tests (CI runs it on PRs) · `pnpm test:e2e`: Playwright (added in M1.1)
-- `pnpm db:generate` / `pnpm db:migrate` / `pnpm db:seed` (added in M0.2)
+- `pnpm check`: prettier check + lint + typecheck + unit/integration tests (CI runs it on PRs; API tests start a Postgres container, so Docker must be running) · `pnpm test:e2e`: Playwright (added in M1.1)
+- `pnpm db:generate` (drizzle-kit SQL migration from the schema) / `pnpm db:migrate` / `pnpm db:seed` (deterministic, rerunnable)
 - Later: `pnpm desktop:dev` (Tauri), `pnpm mobile:android` (Capacitor)
 
 ## Non-negotiable rules
