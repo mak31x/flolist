@@ -15,6 +15,7 @@ import { useState } from "react";
 import { useThemeStore } from "../shell/theme-store.ts";
 import { EmptyTasks, Page } from "./Page.tsx";
 import { settingsTabs } from "./settings-tabs.ts";
+import { useSaveTheme, useSignOut } from "../features/auth/hooks.ts";
 
 export function InboxView() {
   return (
@@ -183,9 +184,9 @@ export function NotFoundView() {
 }
 
 export function SettingsView() {
-  const { tab } = useParams({ from: "/settings/$tab" });
+  const { tab } = useParams({ from: "/_app/settings/$tab" });
   return (
-    <Page title="Settings" actions={<Pill disabled>Sign out</Pill>}>
+    <Page title="Settings" actions={<SignOutPill />}>
       <nav
         aria-label="Settings sections"
         className="-mx-5 flex gap-1.5 overflow-x-auto px-5 pb-1 md:mx-0 md:px-0"
@@ -232,9 +233,14 @@ function SettingsCard({
   );
 }
 
+function SignOutPill() {
+  const signOut = useSignOut();
+  return <Pill onClick={() => void signOut()}>Sign out</Pill>;
+}
+
 function AppearanceCard() {
   const preference = useThemeStore((s) => s.preference);
-  const setPreference = useThemeStore((s) => s.setPreference);
+  const saveTheme = useSaveTheme();
   const current = themes.find((t) => t.id === preference);
   return (
     <SettingsCard title="Appearance" description="Active theme">
@@ -247,7 +253,7 @@ function AppearanceCard() {
             <MenuItem
               key={t.id}
               onSelect={() => {
-                setPreference(t.id);
+                saveTheme.mutate(t.id);
               }}
               trailing={t.id === preference ? <Check aria-label="Selected" /> : undefined}
             >

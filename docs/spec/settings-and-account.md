@@ -37,5 +37,6 @@ System preference · Light · Dark · Blackout (true-black OLED) · Ocean · Ber
 - No automatic purge (Superlist parity). An admin-configurable `TRASH_RETENTION_DAYS` env exists, defaulting to off.
 
 ## Authentication screens
-- `/login`, `/signup`, `/forgot-password`, `/verify-email`: centred card with the Flolist wordmark, "Continue with Google", and an email + password form. Keep the visual style calm and consistent with the app.
-- After sign-up: create the personal workspace and seed a "Getting started" list that explains features (as tasks the user can tick off).
+- `/login`, `/signup`, `/forgot-password`, `/reset-password`, `/verify-email`: centred card with the Flolist wordmark, "Continue with Google" (only when the server has Google keys), and an email + password form. Keep the visual style calm and consistent with the app.
+- Email must be verified before the first log-in. `/verify-email` says "Check your inbox" after sign-up (with a resend button) and explains expired or used links. The verification link signs the user in and lands them in Inbox. `/reset-password` is where the reset email's link lands (token in the URL). Copy is ours `[assumption]` (D-036).
+- After sign-up: create the personal workspace (M1.1) and seed a "Getting started" list that explains features as tasks the user can tick off (M3.1, once task blocks exist; with a backfill for accounts created before then).

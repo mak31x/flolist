@@ -4,8 +4,22 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@flolist/web", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@flolist/web",
+        "dev"
+      ],
       "port": 5174
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@flolist/api",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

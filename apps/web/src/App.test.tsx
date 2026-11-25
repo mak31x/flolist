@@ -1,20 +1,18 @@
-import { createMemoryHistory } from "@tanstack/react-router";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
-import { App } from "./App.tsx";
-import { createAppRouter } from "./router.tsx";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useShell } from "./shell/ui-store.ts";
+import { jsonResponse, renderApp, stubFetch, testMe } from "./test-utils.tsx";
 
 function renderAt(path: string, width = 1440) {
-  window.innerWidth = width;
-  const router = createAppRouter(createMemoryHistory({ initialEntries: [path] }));
-  render(<App router={router} />);
-  return router;
+  return renderApp(path, { width }).router;
 }
 
 beforeEach(() => {
   useShell.setState({ sidebarCollapsed: false, coverCollapsed: false, drawerOpen: false });
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("app shell", () => {
@@ -118,11 +116,29 @@ describe("settings", () => {
     });
   });
 
-  it("switches the theme from Features → Appearance", async () => {
+  it("switches the theme from Features → Appearance and saves it on the user", async () => {
+    const { spy } = stubFetch({
+      "PATCH /api/v1/me": async (req) => {
+        const body = (await req.json()) as { theme: string };
+        return jsonResponse({ ...testMe, theme: body.theme, version: 2 });
+      },
+    });
     renderAt("/settings/features");
     await userEvent.click(await screen.findByRole("button", { name: "System preference" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Dark" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(localStorage.getItem("flolist.theme")).toBe("dark");
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledWith("/api/v1/me", expect.objectContaining({ method: "PATCH" }));
+    });
+  });
+
+  it("rolls the theme back with a toast when saving fails", async () => {
+    stubFetch({ "PATCH /api/v1/me": () => jsonResponse({ error: { code: "INTERNAL" } }, 500) });
+    renderAt("/settings/features");
+    await userEvent.click(await screen.findByRole("button", { name: "System preference" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Dark" }));
+    expect(await screen.findByText("Couldn't save the theme. Try again.")).toBeInTheDocument();
+    expect(localStorage.getItem("flolist.theme")).toBe("system");
   });
 });

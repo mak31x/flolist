@@ -24,6 +24,7 @@ import {
 import { useState } from "react";
 import { systemViews } from "./nav.ts";
 import { useShell } from "./ui-store.ts";
+import { useMe, useSignOut } from "../features/auth/hooks.ts";
 
 type SidebarProps = {
   /** Called after a navigation link is used (closes the phone drawer). */
@@ -138,6 +139,8 @@ function QuickCreate() {
 
 function AvatarMenu({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
+  const me = useMe();
+  const signOut = useSignOut();
   const go = (to: "/settings/$tab" | "/trash") => {
     onNavigate?.();
     void (to === "/trash" ? navigate({ to }) : navigate({ to, params: { tab: "profile" } }));
@@ -150,7 +153,7 @@ function AvatarMenu({ onNavigate }: { onNavigate?: () => void }) {
           aria-label="Account menu"
           className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-full p-0.5 pr-1.5 hover:bg-surface-hover"
         >
-          <Avatar name="You" size={24} />
+          <Avatar name={me.name} size={24} />
           <ChevronDown aria-hidden className="size-3.5 text-text-muted" />
         </button>
       </MenuTrigger>
@@ -172,7 +175,13 @@ function AvatarMenu({ onNavigate }: { onNavigate?: () => void }) {
           Trash
         </MenuItem>
         <MenuSeparator />
-        <MenuItem icon={<LogOut />} disabled>
+        <MenuItem
+          icon={<LogOut />}
+          onSelect={() => {
+            onNavigate?.();
+            void signOut();
+          }}
+        >
           Sign out
         </MenuItem>
       </MenuContent>
