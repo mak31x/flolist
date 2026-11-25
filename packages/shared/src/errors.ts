@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /**
  * Error codes from docs/architecture.md → API conventions, plus `RATE_LIMITED` (429)
- * and `INTERNAL` (500), added in M0.2 (D-021).
+ * and `INTERNAL` (500), added in M0.2 (D-021), and `UNAVAILABLE` (503) for a dependency
+ * that isn't configured or reachable, such as object storage (D-037).
  */
 export const errorCodes = [
   "UNAUTHENTICATED",
@@ -13,6 +14,7 @@ export const errorCodes = [
   "LIMIT",
   "RATE_LIMITED",
   "INTERNAL",
+  "UNAVAILABLE",
 ] as const;
 
 export const errorCodeSchema = z.enum(errorCodes);
@@ -28,6 +30,7 @@ export const errorStatus = {
   LIMIT: 403,
   RATE_LIMITED: 429,
   INTERNAL: 500,
+  UNAVAILABLE: 503,
 } as const satisfies Record<ErrorCode, number>;
 
 export const apiErrorSchema = z.object({

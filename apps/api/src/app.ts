@@ -1,5 +1,5 @@
 import type { Db } from "@flolist/db";
-import type { HealthResponse, PublicConfig } from "@flolist/shared";
+import { DEFAULT_MAX_UPLOAD_MB, type HealthResponse, type PublicConfig } from "@flolist/shared";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -11,7 +11,9 @@ import { silentLogger } from "./lib/logger.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
 import { originCheck } from "./middleware/origin-check.ts";
 import { requestLog } from "./middleware/request-log.ts";
+import { fileRoutes, uploadRoutes, type FileRoutesOptions } from "./routes/files.ts";
 import { meRoutes } from "./routes/me.ts";
+import type { Storage } from "./storage/storage.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
 import { noUser, type AppEnv, type ResolveUser } from "./types.ts";
 
@@ -33,6 +35,16 @@ export interface AppDeps {
   appUrl?: string;
   /** Whether Google OAuth keys are configured (shown on the sign-in screens). */
   googleSignIn?: boolean;
+  /** Object storage; uploads and downloads answer 503 without it. */
+  storage?: Storage | null;
+  /** Per-file limit in bytes (default 25 MB, D-013). */
+  maxUploadBytes?: number;
+  /** Per-workspace storage limit in bytes; undefined = unlimited. */
+  maxWorkspaceBytes?: number | undefined;
+  /** Browsers PUT to presigned storage URLs instead of through the API (needs bucket CORS). */
+  directUpload?: boolean;
+  /** Upload reservations per user (default 30 per minute). */
+  uploadRateLimit?: { limit: number; windowMs: number };
 }
 
 /** Auth endpoints that send email or check a password get the stricter limit. */
@@ -81,6 +93,16 @@ export function createApp(deps: AppDeps = {}) {
   });
   app.on("POST", SENSITIVE_AUTH_PATHS, authLimiter);
 
+  const uploadLimiter = rateLimit({
+    limit: deps.uploadRateLimit?.limit ?? 30,
+    windowMs: deps.uploadRateLimit?.windowMs ?? 60_000,
+    key: (c) => {
+      const user = c.get("user");
+      return user ? `upload-user:${user.id}` : `upload-ip:${clientKey(c)}`;
+    },
+  });
+  app.on("POST", "/api/v1/uploads", uploadLimiter);
+
   if (deps.auth) {
     const { auth } = deps;
     app.on(["GET", "POST"], "/api/auth/*", (c) => {
@@ -104,7 +126,15 @@ export function createApp(deps: AppDeps = {}) {
     return c.json(body);
   });
 
+  const files: FileRoutesOptions = {
+    storage: deps.storage ?? null,
+    maxUploadBytes: deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_MB * 1024 * 1024,
+    maxWorkspaceBytes: deps.maxWorkspaceBytes,
+    directUpload: deps.directUpload ?? false,
+  };
   app.route("/api/v1/me", meRoutes);
+  app.route("/api/v1/uploads", uploadRoutes(files));
+  app.route("/api/v1/files", fileRoutes(files));
   app.route("/api/v1/workspaces", workspaceRoutes);
 
   app.notFound((c) => errorResponse(c, "NOT_FOUND", "Route not found"));

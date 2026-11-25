@@ -41,8 +41,9 @@ services:
       timeout: 3s
       retries: 30
 
-  # One-shot: creates the dev bucket if it is missing, then exits.
-  # Kept in a profile so `up --wait` ignores it; `pnpm infra:up` runs it explicitly.
+  # One-shot: creates the dev bucket if it is missing and sets its CORS rules, then exits
+  # (infra/scripts/rustfs-init.sh). Kept in a profile so `up --wait` ignores it;
+  # `pnpm infra:up` runs it explicitly.
   rustfs-init:
     image: amazon/aws-cli:2.42.3
     profiles: ["init"]
@@ -54,11 +55,10 @@ services:
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-flolist-dev-secret}
       AWS_DEFAULT_REGION: ${S3_REGION:-us-east-1}
       BUCKET: ${S3_BUCKET:-flolist}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket "$$BUCKET" 2>/dev/null
-        || aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket "$$BUCKET"
+      CORS_ORIGINS: ${S3_CORS_ORIGINS:-http://localhost:5174}
+    volumes:
+      - ./infra/scripts/rustfs-init.sh:/rustfs-init.sh:ro
+    entrypoint: ["/bin/sh", "/rustfs-init.sh"]
 
   mailpit:
     image: axllent/mailpit:v1.34.0

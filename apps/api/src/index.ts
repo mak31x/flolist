@@ -5,8 +5,9 @@ import type { Context } from "hono";
 import { createApp } from "./app.ts";
 import { createAuth, sessionResolver } from "./auth/auth.ts";
 import { createSmtpMailer } from "./email/mailer.ts";
-import { loadEnv } from "./env.ts";
+import { loadEnv, s3ConfigFrom } from "./env.ts";
 import { createLogger } from "./lib/logger.ts";
+import { createS3Storage } from "./storage/storage.ts";
 
 const env = loadEnv();
 const logger = createLogger({ level: env.LOG_LEVEL, pretty: env.NODE_ENV === "development" });
@@ -29,6 +30,9 @@ const google =
     : undefined;
 if (!google) logger.info("Google sign-in is off (GOOGLE_CLIENT_ID/SECRET not set)");
 
+const s3 = s3ConfigFrom(env);
+if (!s3) logger.warn("S3 storage isn't configured: uploads will answer 503 (D-037)");
+
 const auth = createAuth({
   db: database.db,
   mailer: createSmtpMailer(env),
@@ -49,6 +53,14 @@ const app = createApp({
   authRateLimit: { limit: env.AUTH_RATE_LIMIT_MAX, windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS },
   clientKey: clientIp,
   exposeErrors: env.NODE_ENV === "development",
+  storage: s3 ? createS3Storage(s3) : null,
+  directUpload: env.S3_DIRECT_UPLOAD,
+  maxUploadBytes: Math.floor(env.MAX_UPLOAD_MB * 1024 * 1024),
+  maxWorkspaceBytes:
+    env.MAX_WORKSPACE_STORAGE_GB === undefined
+      ? undefined
+      : Math.floor(env.MAX_WORKSPACE_STORAGE_GB * 1024 ** 3),
+  uploadRateLimit: { limit: env.UPLOAD_RATE_LIMIT_MAX, windowMs: env.UPLOAD_RATE_LIMIT_WINDOW_MS },
 });
 
 const server = serve({ fetch: app.fetch, hostname: env.API_HOST, port: env.API_PORT }, (info) => {

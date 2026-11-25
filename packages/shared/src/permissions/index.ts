@@ -13,6 +13,8 @@ export const workspaceActions = [
   "workspace.update",
   "workspace.delete",
   "workspace.manageMembers",
+  /** Upload a file into the workspace (D-037). Viewing files uses `workspace.view`. */
+  "workspace.uploadFile",
 ] as const;
 export type WorkspaceAction = (typeof workspaceActions)[number];
 
@@ -39,12 +41,18 @@ type Matrix = Record<WorkspaceKind, Record<WorkspaceRole, readonly WorkspaceActi
  */
 const workspaceMatrix: Matrix = {
   personal: {
-    owner: ["workspace.view", "workspace.update"],
+    owner: ["workspace.view", "workspace.update", "workspace.uploadFile"],
     member: [],
   },
   team: {
-    owner: ["workspace.view", "workspace.update", "workspace.delete", "workspace.manageMembers"],
-    member: ["workspace.view"],
+    owner: [
+      "workspace.view",
+      "workspace.update",
+      "workspace.delete",
+      "workspace.manageMembers",
+      "workspace.uploadFile",
+    ],
+    member: ["workspace.view", "workspace.uploadFile"],
   },
 };
 

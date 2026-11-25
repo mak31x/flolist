@@ -4,13 +4,14 @@ import { colourIndex, initials } from "./avatar-utils.ts";
 
 export type AvatarPerson = { id?: string; name: string; imageUrl?: string | null };
 
-export type AvatarSize = 16 | 20 | 24 | 32;
+export type AvatarSize = 16 | 20 | 24 | 32 | 72;
 
 const sizeClass: Record<AvatarSize, string> = {
   16: "size-4 text-[8px]",
   20: "size-5 text-[9px]",
   24: "size-6 text-[10px]",
   32: "size-8 text-[12px]",
+  72: "size-18 text-[24px]",
 };
 
 // Literal class names so Tailwind can see them.

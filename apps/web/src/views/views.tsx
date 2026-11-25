@@ -15,7 +15,12 @@ import { useState } from "react";
 import { useThemeStore } from "../shell/theme-store.ts";
 import { EmptyTasks, Page } from "./Page.tsx";
 import { settingsTabs } from "./settings-tabs.ts";
-import { useSaveTheme, useSignOut } from "../features/auth/hooks.ts";
+import { SettingsCard } from "./SettingsCard.tsx";
+import { ProfileTab } from "../features/profile/ProfileTab.tsx";
+import { useMe, useSaveTheme, useSignOut } from "../features/auth/hooks.ts";
+import { systemFirstDay } from "../platform/index.ts";
+import { resolveWeekStart } from "@flolist/shared";
+import { currentWeek } from "./week.ts";
 
 export function InboxView() {
   return (
@@ -36,23 +41,15 @@ export function TodayView() {
   );
 }
 
-/** Monday-first week [assumption until the week-start setting exists]. */
-function currentWeek(now = new Date()): Date[] {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  return Array.from(
-    { length: 7 },
-    (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i),
-  );
-}
-
 export function WeekView() {
+  const me = useMe();
+  const firstDay = resolveWeekStart(me.weekStart, systemFirstDay());
   const today = new Date().toDateString();
   const weekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
   return (
     <Page title="My Week" wide>
       <div className="-mx-5 flex snap-x gap-4 overflow-x-auto px-5 pb-2 md:mx-0 md:px-0">
-        {currentWeek().map((day) => {
+        {currentWeek(firstDay).map((day) => {
           const isToday = day.toDateString() === today;
           return (
             <section
@@ -207,29 +204,15 @@ export function SettingsView() {
         ))}
       </nav>
       <div className="mt-6 flex flex-col gap-3">
-        {tab === "features" ? <AppearanceCard /> : <SettingsPlaceholder />}
+        {tab === "profile" ? (
+          <ProfileTab />
+        ) : tab === "features" ? (
+          <AppearanceCard />
+        ) : (
+          <SettingsPlaceholder />
+        )}
       </div>
     </Page>
-  );
-}
-
-function SettingsCard({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className="flex flex-wrap items-center justify-between gap-4 rounded-settings bg-surface-sunken p-5">
-      <div className="min-w-0">
-        <h2 className="text-[15px] font-bold">{title}</h2>
-        <p className="mt-0.5 text-body text-text-muted">{description}</p>
-      </div>
-      {children}
-    </section>
   );
 }
 
