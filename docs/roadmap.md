@@ -42,11 +42,11 @@ Specs: deploy-oracle.md
 Done when: `https://app.<domain>` serves the shell over HTTPS and every merge redeploys it.
 
 ## M1 — Auth and profile
-### M1.1 Better Auth `[ ]`
+### M1.1 Better Auth `[~]`
 Specs: architecture.md (Security), decisions D-005, spec/settings-and-account.md (auth screens)
 - [ ] Email/password + verification + reset, Google OAuth, sessions, bearer plugin enabled (for native later), organization plugin configured
-- [ ] Login/sign-up screens; protected routes; personal workspace + "Getting started" list on sign-up; SMTP via env (Hostinger in prod, D-032)
-Done when: e2e covers sign-up → verify → land in Inbox, and Google login works on prod.
+- [ ] Login/sign-up screens; protected routes; personal workspace on sign-up (the "Getting started" list moved to M3.1); SMTP via env (Hostinger in prod, D-032)
+Done when: e2e covers sign-up → verify → land in Inbox. Google login works locally; on prod it waits for the owner's Google Cloud OAuth client (Backlog).
 ### M1.2 Profile settings + files `[ ]`
 Specs: spec/settings-and-account.md (Profile)
 - [ ] Settings layout with pill tabs; Profile (name, photo, timezone, first day of week, language placeholder); files service (presigned upload/download)
@@ -70,6 +70,7 @@ Specs: spec/lists-and-blocks.md
 ### M3.1 Task blocks + details panel `[ ]`
 Specs: spec/tasks.md (properties, creating, subtasks), spec/ui-design.md (§4 task row, §5 details panel)
 - [ ] Task block, completion animation + sound, hover affordances; details panel (chips, body editor, subtasks with Tab indent, progress ring); activity log
+- [ ] Seed a "Getting started" list on sign-up (moved from M1.1; spec/settings-and-account.md → Authentication screens), with a backfill for users who signed up before it existed
 ### M3.2 Dates, priority, labels, natural language `[ ]`
 Specs: spec/tasks.md (NL dates, due dates, labels, priority), spec/ui-design.md §6
 - [ ] Date picker popover; chrono-node wrapper + fixtures; suggestion popover; priority + labels + Settings → Labels
@@ -129,6 +130,7 @@ Done when (M4): a full day of work is possible without the mouse.
 ---
 
 ## Backlog (don't build without promoting into a phase)
+- Google login on prod: the owner creates the Google Cloud OAuth client (redirect URI `https://flolist.levitatinglabs.com/api/auth/callback/google`) and adds `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to `/opt/flolist/.env` (deferred from M1.1)
 - Voice messages on tasks (recording only)
 - Message reactions
 - Per-list inbound email addresses
