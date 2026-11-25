@@ -79,7 +79,7 @@ applied_mutations   user_id, client_mutation_id, result jsonb, created_at       
 
 ## Files and integrations
 ```
-files               id, workspace_id, storage_key, filename, mime, size_bytes, width NULL, height NULL, uploaded_by, created_at
+files               id, workspace_id, storage_key unique, filename, mime, size_bytes, width NULL, height NULL, status (pending|ready), uploaded_by NULL (set null), created_at, ready_at NULL   (D-037)
 integration_accounts id, user_id, provider, external_account_id, display_name, tokens_enc bytea, settings jsonb, status, created_at   (M9)
 inbound_addresses   id, user_id, list_id NULL, local_part unique, created_at                                                         (M9)
 api_tokens          id, user_id, name, token_hash, scopes text[], last_used_at, created_at                                           (M9)
