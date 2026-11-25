@@ -2,11 +2,11 @@ name: check
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  # Pushes to main run this through deploy.yml, which deploys only if it passes.
+  workflow_call:
 
 concurrency:
-  group: check-${{ github.ref }}
+  group: check-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

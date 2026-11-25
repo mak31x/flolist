@@ -2,6 +2,31 @@
 
 Read this in M0.4 (first deploy) and M8 (hardening). Update it whenever the real setup changes.
 
+## Current production setup (M0.4, 2026-11-25)
+- **Host:** the shared VM at 130.210.26.170 (Ampere A1, 2 OCPU, 11 GB, Ubuntu 24.04 aarch64). It also runs n8n (`/home/ubuntu/n8n-docker`) and app.leadfest.in (`/home/ubuntu/App.leadfest`). Flolist uses about 120 MB idle and is capped at about 1.9 GB by compose memory limits.
+- **Front proxy:** the n8n stack's `caddy:2` container owns 80/443 and terminates TLS for every site. Flolist's own Caddy has no public port. It joins the `n8n-docker_default` network as `flolist-web` (the same way leadfest's `lms-web` does), and the front Caddyfile has:
+  ```
+  flolist.levitatinglabs.com {
+  	reverse_proxy flolist-web:80
+  }
+  ```
+  Edit `/home/ubuntu/n8n-docker/Caddyfile` **in place** (append with `tee -a`, don't let an editor replace the file: it's a single-file bind mount, so a new inode is invisible to the container), then `docker exec n8n-docker-caddy-1 caddy reload --config /etc/caddy/Caddyfile`.
+- **DNS:** A record `flolist` → 130.210.26.170, **DNS-only** (grey cloud) on Cloudflare. Moving to `app.flolist.com` later = new DNS record + a front-proxy site block + `APP_URL` in `.env`.
+- **Already present, not managed by us:** Docker 29 + compose v5, iptables rules for 22/80/443, fail2ban, unattended-upgrades, key-only SSH with no root login.
+- **Set up by `infra/scripts/server-setup.sh`:** the `deploy` user (CI key only, `restrict`ed, in the `docker` group, which is root-equivalent), `/opt/flolist/{scripts,web-releases,backups}`, and `/etc/cron.d/flolist` (backup 02:30 UTC daily, restore test 04:00 UTC on the 1st).
+- **`/opt/flolist`:** `.env` (from `infra/prod.env.example`, chmod 600), `docker-compose.prod.yml`, `Caddyfile`, `scripts/` (all three uploaded by every deploy), `web-releases/<sha>/` + `current` symlink, `.image-tag` (the live tag), and `backups/{daily,weekly}`.
+
+## Deviations from the generic plan below
+- One image (`ghcr.io/mak31x/flolist-api`) runs the api, the worker and migrations (`node dist/{api,worker,migrate}.js`). esbuild bundles everything, so the image has no `node_modules` (no `pnpm deploy`).
+- Web builds are kept per release in `web-releases/<sha>` with an atomic `current` symlink, instead of a single `web/` folder, so a rollback restores the matching web build.
+- Backups are `pg_dump -Fc -Z 6` (already compressed, no gzip) and stay on the VM until M8.3 moves them offsite.
+- Migrations are never rolled back. Each migration must work with the previous release (expand/contract).
+
+## CI/CD setup (one time)
+1. Repo → Settings → Environments → `production`. Add the secrets `DEPLOY_HOST` (130.210.26.170), `DEPLOY_USER` (`deploy`), `DEPLOY_SSH_KEY` (the CI private key) and `DEPLOY_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 130.210.26.170`, checked against the VM's real host key), plus the variable `APP_URL`.
+2. After the first image push: GitHub → Packages → `flolist-api` → Package settings → visibility **Public**, so the VM can pull without a token.
+3. Workflows: `check.yml` runs on PRs; `deploy.yml` runs on every push to main (check → arm64 image on `ubuntu-24.04-arm` + web bundle → `deploy.sh` over SSH → public health check). A failed health check on the VM rolls back to the previous image and web build.
+
 ## Target
 - Ampere A1 Flex VM. Always Free allows up to 4 OCPU / 24 GB RAM in total across A1 instances; check the current limits in the OCI console. OS: Ubuntu 24.04 LTS (aarch64).
 - Budget for Flolist: about 2 OCPU and 2–4 GB RAM. Postgres needs about 1 GB, api + worker about 0.5 GB, and Caddy and an optional S3 server are small.

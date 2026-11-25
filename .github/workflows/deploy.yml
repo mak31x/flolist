@@ -1,0 +1,111 @@
+name: deploy
+
+# Every push to main: check → build the arm64 image + the web bundle → deploy to the Oracle VM.
+# Setup (secrets, environment, GHCR visibility) is in docs/deploy-oracle.md → CI/CD.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deploys never overlap and never get cancelled halfway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+
+  image:
+    needs: check
+    # Native arm64 runner (free for public repos), so no QEMU.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/flolist-api:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/flolist-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  web:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @flolist/web build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web
+          path: apps/web/dist
+          retention-days: 30
+
+  deploy:
+    needs: [image, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ vars.APP_URL }}
+    env:
+      TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: web
+          path: web
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          # Pinned host key: never trust on first use from CI.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload config and web build
+        run: |
+          rsync -az --chmod=D755,F644 web/ "$TARGET:/opt/flolist/web-releases/$SHA/"
+          rsync -az infra/docker-compose.prod.yml infra/Caddyfile "$TARGET:/opt/flolist/"
+          rsync -az --chmod=F755 infra/scripts/ "$TARGET:/opt/flolist/scripts/"
+
+      - name: Migrate, restart, health check (rolls back on failure)
+        run: ssh "$TARGET" "/opt/flolist/scripts/deploy.sh $SHA"
+
+      - name: Public health check
+        if: vars.APP_URL != ''
+        run: |
+          for i in $(seq 1 10); do
+            curl -fsS "${{ vars.APP_URL }}/api/health" && exit 0
+            sleep 3
+          done
+          exit 1
