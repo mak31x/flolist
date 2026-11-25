@@ -246,6 +246,13 @@ Decision:
 - The theme preference moves onto the user record via `GET`/`PATCH /api/v1/me`; the server accepts only `themePreferenceSchema` (packages/shared), which a test keeps equal to the UI's theme list.
 Consequences: A multi-node deployment would need shared rate-limit storage (Backlog, D-023). Native shells use the bearer token from M10/M11.
 
+## D-035 — Playwright e2e setup (M1.1)  (2026-11-25 · Accepted)
+Decision:
+- The suite lives in its own workspace package `apps/e2e` (**@playwright/test 1.65.1**, moved there from the root), so it gets lint and typecheck but stays out of `turbo test`. `pnpm test:e2e` = migrate the dev database, then `playwright test`.
+- Playwright starts the real API (tsx) and web (Vite) dev servers and reuses running ones locally. They talk to the dev Postgres and Mailpit on the D-019 ports; tests read emails through Mailpit's HTTP API. Each run signs up throwaway `e2e-*@flolist.localhost` accounts, so no cleanup or seed is needed.
+- CI: a second job `e2e` in `check.yml` with Postgres and Mailpit service containers (same images as dev) and Chromium only `[assumption]` until the native shells make WebKit matter. Deploys wait for it too, since `deploy.yml` calls `check.yml`. The HTML report is uploaded on failure.
+Consequences: CI pays for one Chromium install per run (~1 min). Local runs need `pnpm infra:up` first.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

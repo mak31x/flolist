@@ -18,11 +18,11 @@
     "infra:down": "docker compose -f infra/docker-compose.dev.yml --project-directory . down",
     "db:generate": "pnpm --filter @flolist/db db:generate",
     "db:migrate": "pnpm --filter @flolist/db db:migrate",
-    "db:seed": "pnpm --filter @flolist/db db:seed"
+    "db:seed": "pnpm --filter @flolist/db db:seed",
+    "test:e2e": "pnpm db:migrate && pnpm --filter @flolist/e2e test:e2e"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@playwright/test": "1.65.1",
     "@types/node": "26.6.6",
     "esbuild": "0.28.2",
     "eslint": "10.15.0",

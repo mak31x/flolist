@@ -188,9 +188,6 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.15.0(jiti@2.7.0))
-      '@playwright/test':
-        specifier: 1.65.1
-        version: 1.65.1
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
@@ -267,6 +264,12 @@ importers:
       tsx:
         specifier: 4.23.15
         version: 4.23.15
+
+  apps/e2e:
+    devDependencies:
+      '@playwright/test':
+        specifier: 1.65.1
+        version: 1.65.1
 
   apps/web:
     dependencies:
@@ -7567,6 +7570,7 @@ snapshots:
       jsdom: 31.0.1
     transitivePeerDependencies:
       - msw
+    optional: true
 
   w3c-xmlserializer@6.0.0:
     dependencies:
