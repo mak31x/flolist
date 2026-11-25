@@ -17,6 +17,7 @@
     "@flolist/db": "workspace:*",
     "@flolist/shared": "workspace:*",
     "@hono/node-server": "2.1.11",
+    "better-auth": "1.7.28",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.21",
     "nodemailer": "10.6.1",

@@ -227,6 +227,25 @@ Decision: Production mail goes through **Hostinger SMTP**: `smtp.hostinger.com:4
 Alternatives: transactional APIs (Resend, Brevo, SES): better deliverability and analytics, but a new account and DNS setup for little volume today.
 Consequences: Hostinger mailboxes have daily sending caps, which is fine for single-user/small-team volume; revisit (Backlog) before company-wide use or digest emails at scale. startrips.in already has Hostinger MX, SPF (`include:_spf.mail.hostinger.com`), DKIM (hostingermail-a/b/c) and DMARC `p=none` (checked 2026-11-25); the future sender domain needs the same records, copied over if its DNS moves to Cloudflare. The owner puts the mailbox password into `/opt/flolist/.env` on the VM themselves. Port 465 is not blocked by OCI (only 25 is).
 
+## D-033 — Auth and email libraries, pinned versions (M1.1)  (2026-11-25 · Accepted)
+Decision: Exact versions, same rules as D-017 (latest stable, older than pnpm's 24 h window):
+- **better-auth 1.7.28** (with `@better-auth/core` and `@better-auth/drizzle-adapter` 1.7.28). It was 23 h old at the start of M1.1, so the install waited for the window instead of pinning 1.7.27.
+- **nodemailer 10.6.1** + **@types/nodemailer 8.0.2**; **@playwright/test 1.65.1** (root dev dependency).
+- **kysely 0.29.9** in `packages/db`. better-auth pulls kysely in, and kysely is an optional peer of drizzle-orm, so without it pnpm made a second drizzle-orm instance for `apps/api` whose types don't match `packages/db`'s. Every importer of drizzle-orm must have the same peer set.
+Consequences: Upgrading better-auth means bumping all `@better-auth/*` packages together and keeping kysely within its peer range.
+
+## D-034 — Better Auth wiring (M1.1)  (2026-11-25 · Accepted)
+Decision:
+- Auth lives at `/api/auth/*` with `baseURL = APP_URL` (same origin as the SPA, D-019/D-029). `BETTER_AUTH_SECRET` is required in production; the API refuses to start with the dev default.
+- Email/password requires verification: sign-up and unverified sign-in both send the link, and the link signs the user in and redirects to `callbackURL` (Inbox). Password reset revokes the account's other sessions. Emails go out in the background (failures logged) so response times don't reveal whether an account exists.
+- Google sign-in is on only when `GOOGLE_CLIENT_ID`/`SECRET` are set; prod keys wait for the owner (Backlog).
+- Plugins: `bearer()` (token returned in `set-auth-token`) and `organization()` with roles owner/member only and **no user-created organizations until Teams (M7.1)** `[assumption]`, because a team needs its `workspaces` row.
+- Rate limiting: Better Auth's own limiter is off. The API's limiter applies a stricter per-IP limit (`AUTH_RATE_LIMIT_MAX=10` per `AUTH_RATE_LIMIT_WINDOW_MS=60000`) to sign-in, sign-up, password reset, reset requests, verification emails and password changes `[assumption]`. The API overwrites `x-flolist-client-ip` with its proxy-aware client IP and Better Auth reads only that header.
+- CSRF: Better Auth guards `/api/auth`; an Origin check on `/api/v1` rejects cookie-authenticated mutations whose `Origin` isn't APP_URL's. Bearer requests skip it.
+- The personal workspace and `user_settings` row are created in `user.create.after`. Better Auth runs that hook only after its transaction commits, so it can't be atomic with the user insert; the helper is idempotent and `GET /api/v1/me` re-runs it to repair a missed one.
+- The theme preference moves onto the user record via `GET`/`PATCH /api/v1/me`; the server accepts only `themePreferenceSchema` (packages/shared), which a test keeps equal to the UI's theme list.
+Consequences: A multi-node deployment would need shared rate-limit storage (Backlog, D-023). Native shells use the bearer token from M10/M11.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)
