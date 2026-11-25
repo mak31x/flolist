@@ -1,10 +1,19 @@
+import type { QueryClient } from "@tanstack/react-query";
 import {
-  createRootRoute,
+  createRootRouteWithContext,
   createRoute,
   createRouter,
+  Outlet,
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router";
+import { meQuery } from "./features/auth/api.ts";
+import { AFTER_AUTH_PATH } from "./features/auth/auth-client.ts";
+import { ForgotPasswordView } from "./features/auth/components/ForgotPasswordView.tsx";
+import { LoginView } from "./features/auth/components/LoginView.tsx";
+import { ResetPasswordView } from "./features/auth/components/ResetPasswordView.tsx";
+import { SignupView } from "./features/auth/components/SignupView.tsx";
+import { VerifyEmailView } from "./features/auth/components/VerifyEmailView.tsx";
 import type { PanelMode } from "./shell/RightPanel.tsx";
 import { AppShell } from "./shell/AppShell.tsx";
 import {
@@ -32,10 +41,95 @@ declare module "@tanstack/react-router" {
   }
 }
 
-const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotFoundView });
+export interface RouterContext {
+  queryClient: QueryClient;
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+  component: Outlet,
+  notFoundComponent: NotFoundView,
+});
+
+const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+/** Drops undefined keys so search objects stay clean (exactOptionalPropertyTypes). */
+function compact<T extends Record<string, string | undefined>>(o: T) {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as {
+    [K in keyof T]?: string;
+  };
+}
+
+/**
+ * Every app view sits under this layout: signed-out visitors go to /login and come back
+ * afterwards. A failed email-verification link (`?error=` on its callback) goes to /verify-email.
+ */
+const appRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "_app",
+  component: AppShell,
+  beforeLoad: async ({ context, location }) => {
+    const me = await context.queryClient.query({ ...meQuery, staleTime: "static" });
+    if (me) return { me };
+    const error = optionalString((location.search as Record<string, unknown>).error);
+    if (error) {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router's redirect API
+      throw redirect({ to: "/verify-email", search: { error } });
+    }
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router's redirect API
+    throw redirect({ to: "/login", search: { redirect: location.href } });
+  },
+});
+
+/** Signed-in users skip the log-in and sign-up screens. */
+async function redirectIfSignedIn({ context }: { context: RouterContext }) {
+  const me = await context.queryClient.query({ ...meQuery, staleTime: "static" });
+  if (me) {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router's redirect API
+    throw redirect({ href: AFTER_AUTH_PATH });
+  }
+}
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login",
+  component: LoginView,
+  validateSearch: (s: Record<string, unknown>) =>
+    compact({
+      redirect: optionalString(s.redirect),
+      error: optionalString(s.error),
+      reset: optionalString(s.reset),
+    }),
+  beforeLoad: redirectIfSignedIn,
+});
+const signupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/signup",
+  component: SignupView,
+  validateSearch: (s: Record<string, unknown>) => compact({ redirect: optionalString(s.redirect) }),
+  beforeLoad: redirectIfSignedIn,
+});
+const verifyEmailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/verify-email",
+  component: VerifyEmailView,
+  validateSearch: (s: Record<string, unknown>) =>
+    compact({ email: optionalString(s.email), error: optionalString(s.error) }),
+});
+const forgotPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/forgot-password",
+  component: ForgotPasswordView,
+});
+const resetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reset-password",
+  component: ResetPasswordView,
+  validateSearch: (s: Record<string, unknown>) =>
+    compact({ token: optionalString(s.token), error: optionalString(s.error) }),
+});
 
 const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/",
   beforeLoad: () => {
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router's redirect API
@@ -44,61 +138,61 @@ const indexRoute = createRoute({
 });
 
 const inboxRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/inbox",
   component: InboxView,
   staticData: { panel: { kind: "cover", cover: "misty-mountains" } },
 });
 const todayRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/today",
   component: TodayView,
   staticData: { panel: { kind: "cover", cover: "pastel-ocean" } },
 });
 const weekRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/my-week",
   component: WeekView,
 });
 const allTasksRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/all-tasks",
   component: AllTasksView,
 });
 const updatesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/updates",
   component: UpdatesView,
   staticData: { panel: { kind: "cover", cover: "misty-marsh" } },
 });
 const allListsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/all-lists",
   component: AllListsView,
 });
 const listRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/lists/$listId",
   component: ListView,
 });
 const taskRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/lists/$listId/tasks/$taskId",
   component: ListView,
 });
 const teamRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/team/$teamId",
   component: TeamView,
 });
 const trashRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/trash",
   component: TrashView,
 });
 
 const settingsIndexRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/settings",
   beforeLoad: () => {
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router's redirect API
@@ -107,7 +201,7 @@ const settingsIndexRoute = createRoute({
 });
 
 const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/settings/$tab",
   component: SettingsView,
   beforeLoad: ({ params }) => {
@@ -119,23 +213,35 @@ const settingsRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  indexRoute,
-  inboxRoute,
-  todayRoute,
-  weekRoute,
-  allTasksRoute,
-  updatesRoute,
-  allListsRoute,
-  listRoute,
-  taskRoute,
-  teamRoute,
-  trashRoute,
-  settingsIndexRoute,
-  settingsRoute,
+  loginRoute,
+  signupRoute,
+  verifyEmailRoute,
+  forgotPasswordRoute,
+  resetPasswordRoute,
+  appRoute.addChildren([
+    indexRoute,
+    inboxRoute,
+    todayRoute,
+    weekRoute,
+    allTasksRoute,
+    updatesRoute,
+    allListsRoute,
+    listRoute,
+    taskRoute,
+    teamRoute,
+    trashRoute,
+    settingsIndexRoute,
+    settingsRoute,
+  ]),
 ]);
 
-export function createAppRouter(history?: RouterHistory) {
-  return createRouter({ routeTree, ...(history ? { history } : {}), defaultPreload: "intent" });
+export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
+  return createRouter({
+    routeTree,
+    context: { queryClient },
+    ...(history ? { history } : {}),
+    defaultPreload: "intent",
+  });
 }
 
 export type AppRouter = ReturnType<typeof createAppRouter>;

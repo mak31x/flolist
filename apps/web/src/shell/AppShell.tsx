@@ -1,14 +1,34 @@
 import { Dialog, IconButton, SheetContent, brand } from "@flolist/ui";
-import { Link, Outlet, useMatches, useParams } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, Navigate, Outlet, useLocation, useMatches, useParams } from "@tanstack/react-router";
 import { Bell, Menu as MenuIcon, PanelLeft, PanelRightOpen, Plus, Search } from "lucide-react";
+import { meQuery } from "../features/auth/api.ts";
+import { useServerThemeSync } from "../features/auth/hooks.ts";
 import { RightPanel, type PanelMode } from "./RightPanel.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { useShell } from "./ui-store.ts";
 
 const noPanel: PanelMode = { kind: "none" };
 
-/** Three-column app shell (ui-design §1): sidebar · main card · right panel. */
+/**
+ * Signed-in layout. The route guard already checked the session; if it expires later
+ * (`/api/v1/me` turns 401 on a refetch), go back to log in.
+ */
 export function AppShell() {
+  const { data: me } = useQuery(meQuery);
+  const location = useLocation();
+  if (me) return <Shell />;
+  // `undefined` = refetching or failed: wait rather than bounce. Once on /login this layout is
+  // about to unmount; redirecting again would nest `?redirect=` forever.
+  if (me === null && location.pathname !== "/login") {
+    return <Navigate to="/login" search={{ redirect: location.href }} replace />;
+  }
+  return null;
+}
+
+/** Three-column app shell (ui-design §1): sidebar · main card · right panel. */
+function Shell() {
+  useServerThemeSync();
   const matches = useMatches();
   const mode = matches.at(-1)?.staticData.panel ?? noPanel;
   const params = useParams({ strict: false });

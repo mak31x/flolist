@@ -44,6 +44,7 @@ const app = createApp({
   auth,
   resolveUser: sessionResolver(auth),
   appUrl: env.APP_URL,
+  googleSignIn: google !== undefined,
   rateLimit: { limit: env.RATE_LIMIT_MAX, windowMs: env.RATE_LIMIT_WINDOW_MS },
   authRateLimit: { limit: env.AUTH_RATE_LIMIT_MAX, windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS },
   clientKey: clientIp,

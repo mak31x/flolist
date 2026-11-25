@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Avatar, AvatarStack } from "./Avatar.tsx";
 import { colourIndex, initials } from "./avatar-utils.ts";
+import { Button } from "./Button.tsx";
 import { Checkbox } from "./Checkbox.tsx";
 import { Dialog, DialogContent, DialogTrigger } from "./Dialog.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -13,6 +14,7 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "./Menu.tsx";
 import { Pill } from "./Pill.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./Popover.tsx";
 import { SegmentedTabs } from "./SegmentedTabs.tsx";
+import { TextField } from "./TextField.tsx";
 import { SkeletonSquiggle } from "./SkeletonSquiggle.tsx";
 import { Toggle } from "./Toggle.tsx";
 import { clearToasts, toast } from "./toast-store.ts";
@@ -191,5 +193,29 @@ describe("EmptyState and SkeletonSquiggle", () => {
     );
     expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
     expect(screen.getByTestId("skeleton-squiggle").children).toHaveLength(3);
+  });
+});
+
+describe("Button and TextField", () => {
+  it("blocks clicks while loading", async () => {
+    const onClick = vi.fn();
+    render(
+      <Button loading onClick={onClick}>
+        Log in
+      </Button>,
+    );
+    const button = screen.getByRole("button", { name: "Log in" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    await userEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("labels the input and describes it with the error", () => {
+    render(<TextField label="Email" hint="We'll send a link" error="Enter a valid email" />);
+    const input = screen.getByLabelText("Email");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Enter a valid email");
+    expect(screen.queryByText("We'll send a link")).not.toBeInTheDocument();
   });
 });

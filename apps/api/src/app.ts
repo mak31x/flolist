@@ -1,5 +1,5 @@
 import type { Db } from "@flolist/db";
-import type { HealthResponse } from "@flolist/shared";
+import type { HealthResponse, PublicConfig } from "@flolist/shared";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -31,6 +31,8 @@ export interface AppDeps {
   authRateLimit?: { limit: number; windowMs: number };
   /** APP_URL; cookie-authenticated mutations must come from this origin. */
   appUrl?: string;
+  /** Whether Google OAuth keys are configured (shown on the sign-in screens). */
+  googleSignIn?: boolean;
 }
 
 /** Auth endpoints that send email or check a password get the stricter limit. */
@@ -93,6 +95,12 @@ export function createApp(deps: AppDeps = {}) {
 
   app.get("/api/health", (c) => {
     const body: HealthResponse = { status: "ok", service: "api", time: new Date().toISOString() };
+    return c.json(body);
+  });
+
+  /** Public: what the signed-out screens need to render. No user data. */
+  app.get("/api/config", (c) => {
+    const body: PublicConfig = { googleSignIn: deps.googleSignIn ?? false };
     return c.json(body);
   });
 

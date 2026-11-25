@@ -26,3 +26,10 @@ export type Me = z.infer<typeof meSchema>;
 /** Profile fields arrive in M1.2; M1.1 only moves the theme onto the user record. */
 export const updateMeSchema = mutationMetaSchema.extend({ theme: themePreferenceSchema });
 export type UpdateMe = z.infer<typeof updateMeSchema>;
+
+/** Public, unauthenticated app config (`GET /api/config`) the sign-in screens need. */
+export const publicConfigSchema = z.object({
+  /** "Continue with Google" is shown only when the server has Google OAuth keys. */
+  googleSignIn: z.boolean(),
+});
+export type PublicConfig = z.infer<typeof publicConfigSchema>;

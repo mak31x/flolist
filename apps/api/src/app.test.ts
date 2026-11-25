@@ -1,4 +1,4 @@
-import { apiErrorSchema, healthResponseSchema } from "@flolist/shared";
+import { apiErrorSchema, healthResponseSchema, publicConfigSchema } from "@flolist/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
@@ -18,6 +18,16 @@ describe("GET /api/health", () => {
   it("sends a request id", async () => {
     const res = await createApp().request("/api/health");
     expect(res.headers.get("x-request-id")).toBeTruthy();
+  });
+});
+
+describe("GET /api/config", () => {
+  it("is public and says whether Google sign-in is on", async () => {
+    const off = await createApp().request("/api/config");
+    expect(off.status).toBe(200);
+    expect(publicConfigSchema.parse(await off.json())).toEqual({ googleSignIn: false });
+    const on = await createApp({ googleSignIn: true }).request("/api/config");
+    expect(publicConfigSchema.parse(await on.json())).toEqual({ googleSignIn: true });
   });
 });
 
