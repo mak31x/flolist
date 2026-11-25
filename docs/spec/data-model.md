@@ -20,6 +20,8 @@ workspaces                id, kind ('personal'|'team'), name, emoji NULL, avatar
 ```
 - Team membership and invitations use Better Auth `member` (roles `owner` | `member`) and `invitation` (status, expiry). Map them through `workspaces.organization_id`.
 - Personal workspaces have no organization; their only member is the owner.
+- Better Auth tables use `uuid` ids (default `uuidv7()`) and snake_case columns; Better Auth runs with `generateId: false` (D-022). `member.role` is limited to `owner | member`.
+- A team workspace must have `organization_id` and a personal one must not (CHECK); each user has exactly one personal workspace (partial unique index).
 
 ## Lists, sharing, sidebar
 ```

@@ -15,7 +15,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:up": "docker compose -f infra/docker-compose.dev.yml --project-directory . up -d --wait && docker compose -f infra/docker-compose.dev.yml --project-directory . run --rm rustfs-init",
-    "infra:down": "docker compose -f infra/docker-compose.dev.yml --project-directory . down"
+    "infra:down": "docker compose -f infra/docker-compose.dev.yml --project-directory . down",
+    "db:generate": "pnpm --filter @flolist/db db:generate",
+    "db:migrate": "pnpm --filter @flolist/db db:migrate",
+    "db:seed": "pnpm --filter @flolist/db db:seed"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -4,13 +4,13 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M0.1 monorepo scaffold (done).
-- **State:** pnpm + Turborepo walking skeleton. `apps/web` (React/Vite hello page that calls `/api/health`), `apps/api` (Hono, `GET /api/health`, 404 in the standard error format), `apps/worker` (empty process), `packages/shared` (error codes + health zod schemas), `packages/ui` (`brand.ts`), `packages/db` (placeholder). Versions: D-017.
-- **Run:** `pnpm install && cp .env.example .env && pnpm dev` → http://localhost:5174 shows "API: ok". `pnpm check` = Prettier + ESLint + tsc + Vitest. CI: `.github/workflows/check.yml`.
-- **Dev ports are offset** (D-019): web 5174, api 3000, Postgres 5433, S3 9010 (console 9011), SMTP 1026, Mailpit UI 8026. A local stack named klass360 holds the standard ports.
-- **Gotchas:** TypeScript is pinned to 6.0.x because typescript-eslint doesn't support TS 7 yet (D-017). pnpm 12 blocks packages published less than 24 h ago, so pin an older patch rather than adding exclusions. Dev S3 is RustFS, not MinIO (D-018). Internal packages are imported as TS source with `.ts` extensions (no build step). `rustfs-init` is in a compose profile because `up --wait` fails on one-shot containers.
-- **Next:** M0.2 (Drizzle, migrations, seed, Hono structure, `authorize()` skeleton, Postgres test container). M0.2 also defines the 500 error shape, since the API has no `onError` handler yet.
-- **Before M0.4:** answer Q-1 (domain) and Q-3 (shared VM?) in decisions.md.
+- **Last phase:** M0.2 DB + API skeleton (done).
+- **State:** `packages/db` has a Drizzle schema for `user`, `organization`, `member` (Better Auth shapes, D-022), `workspaces` and `user_settings`, plus the `0000_init` migration and a deterministic, rerunnable seed (`seedIds`: demo, alex, sam, team Acme). `apps/api` has `createApp(deps)` with request IDs, pino logs, an in-memory rate limiter, `validate()` (zod), one `onError` (standard error body + `requestId`), `authorize()` and `/api/v1/workspaces` (GET list, GET/PATCH `:id`). `packages/shared/permissions` holds the matrix and `permissions.fixtures.ts` (D-024).
+- **Run:** `pnpm infra:up && pnpm db:migrate && pnpm db:seed && pnpm dev`. `pnpm check` runs the API integration tests against a Testcontainers Postgres (Docker must be running; `TEST_DATABASE_URL` skips the container).
+- **No auth yet:** the API's `resolveUser` returns null, so `/api/v1/*` answers 401 until Better Auth replaces it in M1.1. Tests pick the user with the `x-test-user` header (`test/factories.ts`).
+- **Gotchas:** zod 4 `refine` takes `{ error }`, not `{ message }`. The lint rules reject Hono `Context<…, any>` arguments, so pass `c.req.raw` or use `dbOf(c)`. Route validators run before `authorize()`, so a malformed id gets 400 even without a user. `clientMutationId` is accepted but not deduped yet (needs the outbox, M2.1). testcontainers' native deps are set to not build in `pnpm-workspace.yaml`.
+- **Next:** M0.3 (app shell + design tokens).
+- **Before M0.4:** answer Q-1 (domain) and Q-3 (shared VM?) in decisions.md. **In M1.1:** add `session`, `account`, `verification`, `invitation` and run Better Auth with `advanced.database.generateId: false` (D-022).
 
 ---
 
@@ -23,11 +23,11 @@ Specs: architecture.md
 - [x] GitHub Actions: `pnpm check` on PRs; record the pinned versions in decisions.md
 Done when: `pnpm dev` serves a hello page, `/api/health` returns ok, and `pnpm check` passes.
 
-### M0.2 DB + API skeleton `[ ]`
+### M0.2 DB + API skeleton `[x]`
 Specs: architecture.md, spec/data-model.md (identity + workspaces only)
-- [ ] Drizzle setup, first migrations, seed script
-- [ ] Hono structure: error format, zod validation, `authorize()` skeleton + `packages/shared/permissions` with its fixtures format, logging, rate limit
-- [ ] Vitest integration harness against a Postgres test container
+- [x] Drizzle setup, first migrations, seed script
+- [x] Hono structure: error format, zod validation, `authorize()` skeleton + `packages/shared/permissions` with its fixtures format, logging, rate limit
+- [x] Vitest integration harness against a Postgres test container
 Done when: migrations and seed run, and a sample route passes its tests.
 
 ### M0.3 App shell + design tokens `[ ]`
@@ -143,3 +143,4 @@ Done when (M4): a full day of work is possible without the mouse.
 - i18n (Hindi/Gujarati)
 - Add Playwright e2e (`pnpm test:e2e`) to the CI workflow once the first critical flow exists (M1.1 sign-up)
 - Move to TypeScript 7 (native) once typescript-eslint supports it (D-017)
+- Move the rate limiter to Postgres/Redis if the API ever runs on more than one node (D-023)
