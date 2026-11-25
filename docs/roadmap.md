@@ -4,21 +4,23 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** none (project not started).
-- **State:** docs only. Stack: React/TS web app + Node/Hono API + Better Auth + Postgres; Tauri/Capacitor shells later (see decisions.md).
-- **Next:** M0.1. Install Node LTS, pnpm and Docker on the Mac first.
+- **Last phase:** M0.1 monorepo scaffold (done).
+- **State:** pnpm + Turborepo walking skeleton. `apps/web` (React/Vite hello page that calls `/api/health`), `apps/api` (Hono, `GET /api/health`, 404 in the standard error format), `apps/worker` (empty process), `packages/shared` (error codes + health zod schemas), `packages/ui` (`brand.ts`), `packages/db` (placeholder). Versions: D-017.
+- **Run:** `pnpm install && cp .env.example .env && pnpm dev` → http://localhost:5174 shows "API: ok". `pnpm check` = Prettier + ESLint + tsc + Vitest. CI: `.github/workflows/check.yml`.
+- **Dev ports are offset** (D-019): web 5174, api 3000, Postgres 5433, S3 9010 (console 9011), SMTP 1026, Mailpit UI 8026. A local stack named klass360 holds the standard ports.
+- **Gotchas:** TypeScript is pinned to 6.0.x because typescript-eslint doesn't support TS 7 yet (D-017). pnpm 12 blocks packages published less than 24 h ago, so pin an older patch rather than adding exclusions. Dev S3 is RustFS, not MinIO (D-018). Internal packages are imported as TS source with `.ts` extensions (no build step). `rustfs-init` is in a compose profile because `up --wait` fails on one-shot containers.
+- **Next:** M0.2 (Drizzle, migrations, seed, Hono structure, `authorize()` skeleton, Postgres test container). M0.2 also defines the 500 error shape, since the API has no `onError` handler yet.
 - **Before M0.4:** answer Q-1 (domain) and Q-3 (shared VM?) in decisions.md.
-- **Gotchas:** none yet.
 
 ---
 
 ## M0 — Foundation and walking skeleton
-### M0.1 Monorepo scaffold `[ ]`
+### M0.1 Monorepo scaffold `[x]`
 Specs: architecture.md
-- [ ] pnpm + Turborepo workspace: apps/web, apps/api, apps/worker, packages/shared|db|ui; TS strict; ESLint + Prettier; Vitest
-- [ ] `pnpm dev` and `pnpm check` scripts; `.env.example`; `.gitignore`; README quickstart
-- [ ] infra/docker-compose.dev.yml (postgres, minio, mailpit)
-- [ ] GitHub Actions: `pnpm check` on PRs; record the pinned versions in decisions.md
+- [x] pnpm + Turborepo workspace: apps/web, apps/api, apps/worker, packages/shared|db|ui; TS strict; ESLint + Prettier; Vitest
+- [x] `pnpm dev` and `pnpm check` scripts; `.env.example`; `.gitignore`; README quickstart
+- [x] infra/docker-compose.dev.yml (postgres, rustfs (S3; replaced minio, D-018), mailpit)
+- [x] GitHub Actions: `pnpm check` on PRs; record the pinned versions in decisions.md
 Done when: `pnpm dev` serves a hello page, `/api/health` returns ok, and `pnpm check` passes.
 
 ### M0.2 DB + API skeleton `[ ]`
@@ -139,3 +141,5 @@ Done when (M4): a full day of work is possible without the mouse.
 - Multi-window in the desktop app
 - Team admin role (beyond owner/member)
 - i18n (Hindi/Gujarati)
+- Add Playwright e2e (`pnpm test:e2e`) to the CI workflow once the first critical flow exists (M1.1 sign-up)
+- Move to TypeScript 7 (native) once typescript-eslint supports it (D-017)
