@@ -35,6 +35,7 @@ Never `@import` the spec files into this file. That would load them in every ses
 apps/web        React SPA (also the UI for every native shell)
 apps/api        Hono HTTP + WebSocket server
 apps/worker     pg-boss job runner
+apps/e2e        Playwright end-to-end tests (critical flows)
 apps/desktop    Tauri 2 shell (macOS, Windows)            — from M10
 apps/mobile     Capacitor shell (Android, iOS)            — from M11
 packages/shared zod schemas, types, permissions matrix, dates/recurrence/positions helpers
@@ -47,7 +48,7 @@ docs/           roadmap, decisions, architecture, deploy, spec/*
 ## Commands (keep these up to date)
 - `pnpm dev`: web (:5174) + api (:3000) + worker, after starting `infra/docker-compose.dev.yml` (postgres, rustfs, mailpit). Copy `.env.example` to `.env` first
 - `pnpm infra:up` / `pnpm infra:down`: only the Docker services · `pnpm format`: Prettier write
-- `pnpm check`: prettier check + lint + typecheck + unit/integration tests (CI runs it on PRs; API tests start a Postgres container, so Docker must be running) · `pnpm test:e2e`: Playwright (added in M1.1)
+- `pnpm check`: prettier check + lint + typecheck + unit/integration tests (CI runs it on PRs; API tests start a Postgres container, so Docker must be running) · `pnpm test:e2e`: migrates the dev DB, then Playwright (`apps/e2e`) against the API + web dev servers, Postgres and Mailpit (run `pnpm infra:up` first; CI job `e2e`)
 - `pnpm db:generate` (drizzle-kit SQL migration from the schema) / `pnpm db:migrate` / `pnpm db:seed` (deterministic, rerunnable)
 - Deploy: every merge to `main` runs `.github/workflows/deploy.yml` (arm64 image → VM, with auto-rollback). Runbook: docs/deploy-oracle.md
 - Later: `pnpm desktop:dev` (Tauri), `pnpm mobile:android` (Capacitor)

@@ -253,6 +253,18 @@ Decision:
 - CI: a second job `e2e` in `check.yml` with Postgres and Mailpit service containers (same images as dev) and Chromium only `[assumption]` until the native shells make WebKit matter. Deploys wait for it too, since `deploy.yml` calls `check.yml`. The HTML report is uploaded on failure.
 Consequences: CI pays for one Chromium install per run (~1 min). Local runs need `pnpm infra:up` first.
 
+## D-036 — Web auth flow and screens (M1.1)  (2026-11-25 · Accepted)
+Decision:
+- **Routes:** `/login`, `/signup`, `/verify-email`, `/forgot-password`, `/reset-password` sit outside the shell; every app view is a child of the pathless `_app` layout, whose `beforeLoad` requires a session. Signed-out visitors go to `/login?redirect=<path>`; only same-app paths are accepted (`safeRedirect`), never `//…`, absolute URLs, `/api/*` or the auth screens. A failed verification link (Better Auth appends `?error=` to its callback) goes to `/verify-email`. Signed-in users skip `/login` and `/signup`. After verification users land in Inbox; `/` still redirects to Today.
+- **Session source:** `meQuery` (`GET /api/v1/me`, `null` on 401) in TanStack Query, not Better Auth's session store. The router reads it with `queryClient.query({ …, staleTime: "static" })`. The shell redirects to log in only when `me` is `null` (not while it refetches or fails) and never from `/login`, which prevents a redirect loop. Sign-out sets `me` to `null` and drops other cached queries.
+- **Client:** `better-auth/client` (vanilla, not `better-auth/react`) at `/api/auth` on the same origin, with `customFetchImpl` resolving `fetch` per call. Native shells switch to bearer tokens via `platform/` in M10/M11.
+- **Google button:** shown only when public `GET /api/config` reports `googleSignIn: true`; the "G" is drawn in `currentColor` (no hard-coded colours, D-027) `[assumption]` instead of Google's coloured logo.
+- **Theme:** the user record wins; localStorage stays as the pre-paint cache. Changing it is optimistic with rollback and a toast.
+- **Copy:** "Log in to Flolist", "Create your account", "Sign out" (Superlist's exact wording unchecked) `[assumption]`. Error messages are mapped from Better Auth codes in `authErrorMessage`.
+- **Base components:** `Button` (primary/secondary/outline, 40px, `loading`) and `TextField` (label, hint/error via `aria-describedby`) in packages/ui.
+- **Getting started list:** not seeded in M1.1 because lists, blocks and tasks don't exist yet; moved to M3.1 with a backfill for earlier accounts (owner's call).
+Consequences: Other `/api/v1` 401s don't sign the user out yet (Backlog). The Google button can't be checked end to end until an OAuth client exists.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

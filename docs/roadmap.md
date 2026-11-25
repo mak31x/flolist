@@ -4,12 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M0.4 CI/CD + first deploy to Oracle (done). Live at **https://flolist.levitatinglabs.com** (the shell; no auth yet).
-- **State:** every push to main runs `.github/workflows/deploy.yml`: check → native arm64 image `ghcr.io/mak31x/flolist-api:<sha>` (esbuild bundles, D-030) + web bundle → rsync + `infra/scripts/deploy.sh` on the VM (migrate, atomic `web-releases/current` switch, health check, auto-rollback; D-031). The VM is shared with n8n + leadfest; the n8n stack's Caddy is the front proxy and forwards to Flolist's Caddy (`flolist-web` on `n8n-docker_default`, D-029). Backups: nightly cron to `/opt/flolist/backups`.
-- **Verify:** `curl https://flolist.levitatinglabs.com/api/health`; on the VM `cat /opt/flolist/.image-tag`. SSH: `ssh flolist-vm` (owner's sudo user), CI uses `deploy`. Runbook: docs/deploy-oracle.md → Current production setup.
-- **Gotchas:** migrations are forward-only and must work with the previous release. Front-proxy edits go in `/home/ubuntu/n8n-docker/Caddyfile`, in place (single-file bind mount), then `caddy reload`. New prod env vars go into `/opt/flolist/.env` on the VM **and** `infra/prod.env.example`. `deploy.sh` and `backup.sh` use GNU tools (`mv -T`, `find -printf`), so they won't run on macOS. Bots scan the domain constantly; that's expected.
-- **Next:** M1.1 (Better Auth). Prod needs `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`, Google OAuth keys (redirect URI on flolist.levitatinglabs.com) and Hostinger SMTP (D-032: `smtp.hostinger.com:465`, TLS, temporarily a startrips.in mailbox; the owner adds the password) in `/opt/flolist/.env` + `infra/prod.env.example`.
-- **In M1.1:** add `session`, `account`, `verification`, `invitation`; run Better Auth with `advanced.database.generateId: false` (D-022); move the theme preference onto the user record; add Playwright e2e to CI.
+- **Last phase:** M1.1 Better Auth (done; PR from `phase/M1.1-auth`). Email/password sign-up with required verification, reset, sessions, bearer tokens, organization plugin (no user-created teams until M7.1), personal workspace on sign-up, sign-in screens, protected routes, theme on the user record (D-033–D-035).
+- **State:** auth at `/api/auth/*` (Better Auth 1.7.28 on Drizzle, UUIDv7 ids); `GET/PATCH /api/v1/me` (repairs a missing personal workspace); public `GET /api/config`; stricter per-IP limit on sign-in/sign-up/reset/verify; Origin check on cookie mutations to `/api/v1`. Web: auth screens in `apps/web/src/features/auth`, app views under the `_app` layout (`meQuery` is the session source). `Button`/`TextField` in packages/ui.
+- **Run / verify:** `pnpm dev`; sign up at http://localhost:5174/signup, the link arrives in Mailpit (http://localhost:8026). `pnpm check`; `pnpm test:e2e` (needs `pnpm infra:up`; CI job `e2e` runs it with service containers and gates deploys).
+- **Prod before merging:** `BETTER_AUTH_SECRET` and the Hostinger SMTP keys must be in `/opt/flolist/.env` (docs/deploy-oracle.md → Auth and email env), or the deploy rolls back / nobody can verify. Google stays off until the owner creates the OAuth client (Backlog).
+- **Gotchas:** every importer of drizzle-orm needs the same peers (kysely is in packages/db for that, D-033). Better Auth runs `user.create.after` only after commit, so sign-up side effects must be idempotent. `/api/v1` mutations from the browser need the `Origin` header (fetch sends it). Unverified log-in re-sends the verification link (`sendOnSignIn`). Migrations stay forward-only.
+- **Next:** M1.2 Profile settings + files (name, photo, timezone, first day of week; presigned uploads to RustFS/OCI). Extend `updateMeSchema` and the `/api/v1/me` PATCH; the files table backs `user.avatar_file_id`.
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -42,11 +42,11 @@ Specs: deploy-oracle.md
 Done when: `https://app.<domain>` serves the shell over HTTPS and every merge redeploys it.
 
 ## M1 — Auth and profile
-### M1.1 Better Auth `[~]`
+### M1.1 Better Auth `[x]`
 Specs: architecture.md (Security), decisions D-005, spec/settings-and-account.md (auth screens)
-- [ ] Email/password + verification + reset, Google OAuth, sessions, bearer plugin enabled (for native later), organization plugin configured
-- [ ] Login/sign-up screens; protected routes; personal workspace on sign-up (the "Getting started" list moved to M3.1); SMTP via env (Hostinger in prod, D-032)
-Done when: e2e covers sign-up → verify → land in Inbox. Google login works locally; on prod it waits for the owner's Google Cloud OAuth client (Backlog).
+- [x] Email/password + verification + reset, Google OAuth, sessions, bearer plugin enabled (for native later), organization plugin configured
+- [x] Login/sign-up screens; protected routes; personal workspace on sign-up (the "Getting started" list moved to M3.1); SMTP via env (Hostinger in prod, D-032)
+Done when: e2e covers sign-up → verify → land in Inbox. Google sign-in is wired and turns on when `GOOGLE_CLIENT_ID/SECRET` are set; it hasn't been exercised against Google yet (no OAuth client exists; Backlog).
 ### M1.2 Profile settings + files `[ ]`
 Specs: spec/settings-and-account.md (Profile)
 - [ ] Settings layout with pill tabs; Profile (name, photo, timezone, first day of week, language placeholder); files service (presigned upload/download)
@@ -130,6 +130,9 @@ Done when (M4): a full day of work is possible without the mouse.
 ---
 
 ## Backlog (don't build without promoting into a phase)
+- Treat a 401 from any `/api/v1` call (not only `/me`) as "signed out": refetch `meQuery` so the shell returns to log in (M1.1 handles it via `/me` only)
+- Add a WebKit Playwright project once the Tauri/Capacitor shells exist (D-035)
+- Account-existence privacy on sign-up: "user already exists" is shown today (Better Auth default); decide whether to mask it like password reset does
 - Google login on prod: the owner creates the Google Cloud OAuth client (redirect URI `https://flolist.levitatinglabs.com/api/auth/callback/google`) and adds `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to `/opt/flolist/.env` (deferred from M1.1)
 - Voice messages on tasks (recording only)
 - Message reactions
