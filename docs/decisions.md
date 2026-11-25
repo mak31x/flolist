@@ -222,10 +222,10 @@ Decision:
 Consequences: A broken migration needs a manual fix-forward. The VM's disk holds the only backup copy until M8.3 (Backlog risk).
 
 ## D-032 — Production email: Hostinger SMTP  (2026-11-25 · Accepted)
-Context: Q-2. The owner already has Hostinger mail for levitatinglabs.com.
-Decision: Production mail goes through **Hostinger SMTP**: `smtp.hostinger.com:465` with implicit TLS (Nodemailer `secure: true`), authenticated as a Hostinger mailbox on levitatinglabs.com. The provider stays env-only (`SMTP_HOST/PORT/USER/PASS`, `MAIL_FROM`), per D-012, so a switch is a config change. Dev keeps Mailpit.
+Context: Q-2. The owner already has Hostinger mail (startrips.in, and levitatinglabs.com).
+Decision: Production mail goes through **Hostinger SMTP**: `smtp.hostinger.com:465` with implicit TLS (Nodemailer `secure: true`), authenticated as an existing Hostinger mailbox on **startrips.in**, used temporarily as both login and `MAIL_FROM` (the address lives only in `/opt/flolist/.env`, not in this public repo) `[assumption: temporary]`. A dedicated Flolist sender (e.g. on levitatinglabs.com or flolist.com) replaces it later. The provider stays env-only (`SMTP_HOST/PORT/USER/PASS`, `MAIL_FROM`), per D-012, so a switch is a config change. Dev keeps Mailpit.
 Alternatives: transactional APIs (Resend, Brevo, SES): better deliverability and analytics, but a new account and DNS setup for little volume today.
-Consequences: Hostinger mailboxes have daily sending caps, which is fine for single-user/small-team volume; revisit (Backlog) before company-wide use or digest emails at scale. SPF/DKIM/DMARC for levitatinglabs.com must stay correct, and if DNS moves to Cloudflare the MX, SPF, DKIM and DMARC records must be copied over. The owner puts the mailbox password into `/opt/flolist/.env` on the VM themselves. Port 465 is not blocked by OCI (only 25 is).
+Consequences: Hostinger mailboxes have daily sending caps, which is fine for single-user/small-team volume; revisit (Backlog) before company-wide use or digest emails at scale. startrips.in already has Hostinger MX, SPF (`include:_spf.mail.hostinger.com`), DKIM (hostingermail-a/b/c) and DMARC `p=none` (checked 2026-11-25); the future sender domain needs the same records, copied over if its DNS moves to Cloudflare. The owner puts the mailbox password into `/opt/flolist/.env` on the VM themselves. Port 465 is not blocked by OCI (only 25 is).
 
 ---
 

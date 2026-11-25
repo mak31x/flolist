@@ -8,7 +8,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - **State:** every push to main runs `.github/workflows/deploy.yml`: check → native arm64 image `ghcr.io/mak31x/flolist-api:<sha>` (esbuild bundles, D-030) + web bundle → rsync + `infra/scripts/deploy.sh` on the VM (migrate, atomic `web-releases/current` switch, health check, auto-rollback; D-031). The VM is shared with n8n + leadfest; the n8n stack's Caddy is the front proxy and forwards to Flolist's Caddy (`flolist-web` on `n8n-docker_default`, D-029). Backups: nightly cron to `/opt/flolist/backups`.
 - **Verify:** `curl https://flolist.levitatinglabs.com/api/health`; on the VM `cat /opt/flolist/.image-tag`. SSH: `ssh flolist-vm` (owner's sudo user), CI uses `deploy`. Runbook: docs/deploy-oracle.md → Current production setup.
 - **Gotchas:** migrations are forward-only and must work with the previous release. Front-proxy edits go in `/home/ubuntu/n8n-docker/Caddyfile`, in place (single-file bind mount), then `caddy reload`. New prod env vars go into `/opt/flolist/.env` on the VM **and** `infra/prod.env.example`. `deploy.sh` and `backup.sh` use GNU tools (`mv -T`, `find -printf`), so they won't run on macOS. Bots scan the domain constantly; that's expected.
-- **Next:** M1.1 (Better Auth). Prod needs `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`, Google OAuth keys (redirect URI on flolist.levitatinglabs.com) and Hostinger SMTP (D-032: `smtp.hostinger.com:465`, TLS; the owner adds the mailbox password) in `/opt/flolist/.env` + `infra/prod.env.example`.
+- **Next:** M1.1 (Better Auth). Prod needs `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`, Google OAuth keys (redirect URI on flolist.levitatinglabs.com) and Hostinger SMTP (D-032: `smtp.hostinger.com:465`, TLS, temporarily a startrips.in mailbox; the owner adds the password) in `/opt/flolist/.env` + `infra/prod.env.example`.
 - **In M1.1:** add `session`, `account`, `verification`, `invitation`; run Better Auth with `advanced.database.generateId: false` (D-022); move the theme preference onto the user record; add Playwright e2e to CI.
 ---
 
@@ -147,5 +147,6 @@ Done when (M4): a full day of work is possible without the mouse.
 - Measure Superlist's real Dark palette and adjust the derived Dark tokens (D-027)
 - Worker healthcheck in docker-compose.prod.yml once pg-boss runs jobs (M5); today it only stays alive
 - Automate the front-proxy site block (it lives in the n8n stack's Caddyfile, D-029) if more Flolist hostnames appear (staging, app.flolist.com)
+- Replace the temporary startrips.in sender with a Flolist address (D-032)
 - Move transactional email to a dedicated provider (Resend/Brevo/SES) before company-wide use or high-volume digests (D-032)
 - Let the VM pull from GHCR with a read-only token instead of a public package, if the repo ever goes private (D-030)
