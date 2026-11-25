@@ -1,0 +1,59 @@
+/* Enter/exit keyframes for floating UI, driven by the --motion-* tokens (reduced motion sets them to 0ms). */
+@keyframes fl-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fl-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+}
+@keyframes fl-slide-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes fl-slide-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes fl-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes fl-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.fl-fade {
+  animation: fl-fade-in var(--motion-base) var(--motion-ease-out);
+}
+.fl-pop {
+  animation: fl-pop-in var(--motion-base) var(--motion-ease-out);
+  transform-origin: var(--radix-popper-transform-origin, top left);
+}
+.fl-sheet-left {
+  animation: fl-slide-left var(--motion-base) var(--motion-ease-out);
+}
+.fl-sheet-right {
+  animation: fl-slide-right var(--motion-base) var(--motion-ease-out);
+}
+.fl-sheet-bottom {
+  animation: fl-slide-up var(--motion-base) var(--motion-ease-out);
+}
+.fl-toast {
+  animation: fl-toast-in var(--motion-base) var(--motion-ease-out);
+}
+.fl-toast[data-swipe="move"] {
+  transform: translateX(var(--radix-toast-swipe-move-x));
+}
+.fl-toast[data-swipe="end"] {
+  animation: fl-fade-in var(--motion-fast) reverse forwards;
+}

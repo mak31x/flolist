@@ -4,14 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M0.2 DB + API skeleton (done).
-- **State:** `packages/db` has a Drizzle schema for `user`, `organization`, `member` (Better Auth shapes, D-022), `workspaces` and `user_settings`, plus the `0000_init` migration and a deterministic, rerunnable seed (`seedIds`: demo, alex, sam, team Acme). `apps/api` has `createApp(deps)` with request IDs, pino logs, an in-memory rate limiter, `validate()` (zod), one `onError` (standard error body + `requestId`), `authorize()` and `/api/v1/workspaces` (GET list, GET/PATCH `:id`). `packages/shared/permissions` holds the matrix and `permissions.fixtures.ts` (D-024).
-- **Run:** `pnpm infra:up && pnpm db:migrate && pnpm db:seed && pnpm dev`. `pnpm check` runs the API integration tests against a Testcontainers Postgres (Docker must be running; `TEST_DATABASE_URL` skips the container).
-- **No auth yet:** the API's `resolveUser` returns null, so `/api/v1/*` answers 401 until Better Auth replaces it in M1.1. Tests pick the user with the `x-test-user` header (`test/factories.ts`).
-- **Gotchas:** zod 4 `refine` takes `{ error }`, not `{ message }`. The lint rules reject Hono `Context<…, any>` arguments, so pass `c.req.raw` or use `dbOf(c)`. Route validators run before `authorize()`, so a malformed id gets 400 even without a user. `clientMutationId` is accepted but not deduped yet (needs the outbox, M2.1). testcontainers' native deps are set to not build in `pnpm-workspace.yaml`.
-- **Next:** M0.3 (app shell + design tokens).
-- **Before M0.4:** answer Q-1 (domain) and Q-3 (shared VM?) in decisions.md. **In M1.1:** add `session`, `account`, `verification`, `invitation` and run Better Auth with `advanced.database.generateId: false` (D-022).
-
+- **Last phase:** M0.3 App shell + design tokens (done).
+- **State:** `packages/ui` has the Light/Dark tokens (`themes.css`, mapped to Tailwind in `tailwind.css`), Fontsource fonts, `motion.ts`, the theme helpers (`theme.ts`, including a pre-paint boot script), `shortcuts.ts` and 14 components (D-027). `apps/web` has the three-column `AppShell` (sidebar · main card · cover or task-details panel), the tablet/phone layouts, code-based TanStack Router routes for every view (placeholders), and 8 Unsplash covers (`public/covers`, credits in `docs/credits.md`).
+- **Run:** `pnpm dev` (or just `pnpm --filter @flolist/web dev`), then open http://localhost:5174. The theme switch is at Settings → Features. `pnpm check` covers ui and web with Vitest + Testing Library.
+- **Gotchas:** Tailwind v4 resets the colour palette (`--color-*: initial`), so only token colours exist; there's no `bg-white`. Never put a literal colour in a component. A route's right panel comes from `staticData.panel`, and an open task is detected from the `taskId` param. `matchMedia`, `ResizeObserver` and `scrollTo` are stubbed in the test setups. Create, New task, Sign out and the phone "+" are disabled placeholders; Search does nothing yet. The web bundle is 614 KB, which triggers Vite's size warning.
+- **Next:** M0.4 (CI/CD + first deploy to Oracle). Answer Q-1 (domain) and Q-3 (shared VM?) first.
+- **In M1.1:** add `session`, `account`, `verification`, `invitation`; run Better Auth with `advanced.database.generateId: false` (D-022); move the theme preference onto the user record.
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -30,11 +28,11 @@ Specs: architecture.md, spec/data-model.md (identity + workspaces only)
 - [x] Vitest integration harness against a Postgres test container
 Done when: migrations and seed run, and a sample route passes its tests.
 
-### M0.3 App shell + design tokens `[ ]`
+### M0.3 App shell + design tokens `[x]`
 Specs: spec/ui-design.md, spec/settings-and-account.md (themes list only)
-- [ ] packages/ui tokens, Light + Dark themes (the rest come in M6), fonts, motion constants
-- [ ] Three-column shell (sidebar, main card, right cover panel), responsive breakpoints, routes for every view (placeholders)
-- [ ] Base components (Pill/Chip, IconButton, SegmentedTabs, KbdHint, Popover, Menu, Dialog, Toast, EmptyState, SkeletonSquiggle, Avatar/AvatarStack, Toggle, animated Checkbox)
+- [x] packages/ui tokens, Light + Dark themes (the rest come in M6), fonts, motion constants
+- [x] Three-column shell (sidebar, main card, right cover panel), responsive breakpoints, routes for every view (placeholders)
+- [x] Base components (Pill/Chip, IconButton, SegmentedTabs, KbdHint, Popover, Menu, Dialog, Toast, EmptyState, SkeletonSquiggle, Avatar/AvatarStack, Toggle, animated Checkbox)
 Done when: the shell matches ui-design §1 at 1440px and 375px.
 
 ### M0.4 CI/CD + first deploy to Oracle `[ ]`
@@ -144,3 +142,6 @@ Done when (M4): a full day of work is possible without the mouse.
 - Add Playwright e2e (`pnpm test:e2e`) to the CI workflow once the first critical flow exists (M1.1 sign-up)
 - Move to TypeScript 7 (native) once typescript-eslint supports it (D-017)
 - Move the rate limiter to Postgres/Redis if the API ever runs on more than one node (D-023)
+- Code-split the web bundle (route-level lazy imports) — 614 KB after M0.3; settle with production bundling in M0.4/M4
+- Cover settings (gear button on the cover panel: choose a built-in cover or upload one) — with list covers
+- Measure Superlist's real Dark palette and adjust the derived Dark tokens (D-027)
