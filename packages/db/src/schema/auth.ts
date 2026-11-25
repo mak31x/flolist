@@ -7,8 +7,19 @@
  * the DB columns are snake_case.
  */
 import { sql } from "drizzle-orm";
-import { boolean, check, index, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  type AnyPgColumn,
+  boolean,
+  check,
+  index,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { createdAt, id, updatedAt, version } from "./columns.ts";
+import { files } from "./files.ts";
 
 export const weekStarts = ["system", "mon", "sun", "sat"] as const;
 export type WeekStart = (typeof weekStarts)[number];
@@ -27,10 +38,11 @@ export const user = pgTable(
     // Flolist profile fields (data-model.md → Identity and workspaces)
     firstName: text("first_name"),
     lastName: text("last_name"),
-    /** → files.id once the files table exists (M1.2). */
-    avatarFileId: uuid("avatar_file_id"),
+    avatarFileId: uuid("avatar_file_id").references((): AnyPgColumn => files.id, {
+      onDelete: "set null",
+    }),
     timezone: text("timezone").notNull().default("UTC"),
-    locale: text("locale").notNull().default("en"),
+    locale: text("locale").notNull().default("system"),
     weekStart: text("week_start", { enum: weekStarts }).notNull().default("system"),
     theme: text("theme").notNull().default("system"),
     soundsEnabled: boolean("sounds_enabled").notNull().default(true),

@@ -1,4 +1,4 @@
-import type { Me } from "@flolist/shared";
+import { uuidv7, type Me, type UpdateMe } from "@flolist/shared";
 import { toast, type ThemePreference } from "@flolist/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -34,7 +34,7 @@ export function useSaveTheme() {
     mutationFn: async (theme: ThemePreference) => {
       const me = queryClient.getQueryData(meQuery.queryKey);
       if (!me) throw new Error("not signed in");
-      return updateMe({ theme, clientMutationId: crypto.randomUUID(), baseVersion: me.version });
+      return updateMe({ theme, clientMutationId: uuidv7(), baseVersion: me.version });
     },
     onMutate: (theme) => {
       const previous = queryClient.getQueryData(meQuery.queryKey);
@@ -50,6 +50,44 @@ export function useSaveTheme() {
         useThemeStore.getState().setPreference(ctx.previous.theme);
       }
       toast("Couldn't save the theme. Try again.");
+    },
+    onSuccess: (me) => {
+      queryClient.setQueryData(meQuery.queryKey, me);
+    },
+  });
+}
+
+export type ProfilePatch = Omit<UpdateMe, "clientMutationId" | "baseVersion">;
+
+/**
+ * Optimistically patches the signed-in user's profile and saves it (field-level LWW, D-006).
+ * On error the previous record comes back and `errorMessage` is toasted.
+ * `optimistic` lets a caller show more than the raw fields (e.g. a new photo's URL).
+ */
+export function useUpdateMe(errorMessage = "Couldn't save your changes. Try again.") {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { patch: ProfilePatch; optimistic?: Partial<Me> }) => {
+      const me = queryClient.getQueryData(meQuery.queryKey);
+      if (!me) throw new Error("not signed in");
+      return updateMe({ ...vars.patch, clientMutationId: uuidv7(), baseVersion: me.version });
+    },
+    onMutate: async ({ patch, optimistic }) => {
+      await queryClient.cancelQueries({ queryKey: meQuery.queryKey });
+      const previous = queryClient.getQueryData(meQuery.queryKey);
+      queryClient.setQueryData(meQuery.queryKey, (old): Me | null | undefined => {
+        if (!old) return old;
+        const next: Me = { ...old, ...(patch as Partial<Me>), ...optimistic };
+        if (patch.firstName !== undefined || patch.lastName !== undefined) {
+          next.name = `${next.firstName} ${next.lastName}`.trim();
+        }
+        return next;
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(meQuery.queryKey, ctx.previous);
+      toast(errorMessage);
     },
     onSuccess: (me) => {
       queryClient.setQueryData(meQuery.queryKey, me);

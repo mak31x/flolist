@@ -153,7 +153,7 @@ function AvatarMenu({ onNavigate }: { onNavigate?: () => void }) {
           aria-label="Account menu"
           className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-full p-0.5 pr-1.5 hover:bg-surface-hover"
         >
-          <Avatar name={me.name} size={24} />
+          <Avatar id={me.id} name={me.name} imageUrl={me.avatarUrl} size={24} />
           <ChevronDown aria-hidden className="size-3.5 text-text-muted" />
         </button>
       </MenuTrigger>

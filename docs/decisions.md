@@ -137,7 +137,7 @@ Decision:
 - `pnpm check` = `prettier --check .` + `turbo run lint typecheck test`. CI runs it on PRs and on pushes to main.
 - Playwright e2e is added to CI with the first critical flow (M1.1).
 
-## D-021 — API error codes and HTTP statuses (M0.2)  (2026-11-25 · Accepted)
+## D-021 — API error codes and HTTP statuses (M0.2)  (2026-11-25 · Accepted; `UNAVAILABLE` 503 added by D-037)
 Context: architecture.md listed six error codes but no 500 or 429 shape, and no status per code.
 Decision: Two codes are added: `RATE_LIMITED` (429) and `INTERNAL` (500). Statuses live in `errorStatus` in `packages/shared/errors.ts`: UNAUTHENTICATED 401, FORBIDDEN 403, NOT_FOUND 404, VALIDATION 400, CONFLICT 409, LIMIT 403 `[assumption]`. Every error body may carry `requestId` (the `X-Request-Id` header). VALIDATION `details` is a list of `{ source, path, message }`. Unexpected errors return INTERNAL with a generic message; the real message and stack are included only in development. A body that isn't valid JSON is VALIDATION.
 Consequences: Handlers throw `ApiException` (or `unauthenticated()`, `forbidden()`, `notFound()`); one `onError` formats everything.
@@ -264,6 +264,38 @@ Decision:
 - **Base components:** `Button` (primary/secondary/outline, 40px, `loading`) and `TextField` (label, hint/error via `aria-describedby`) in packages/ui.
 - **Getting started list:** not seeded in M1.1 because lists, blocks and tasks don't exist yet; moved to M3.1 with a backfill for earlier accounts (owner's call).
 Consequences: Other `/api/v1` 401s don't sign the user out yet (Backlog). The Google button can't be checked end to end until an OAuth client exists.
+
+## D-037 — Files service and object storage (M1.2)  (2026-11-26 · Accepted)
+Context: D-012 asked for presigned upload/download URLs. OCI Object Storage's S3 Compatibility API doesn't list `PutBucketCors` (checked 2026-11-26), so browsers can't PUT to presigned OCI URLs from the app's origin.
+Decision:
+- Pinned: **@aws-sdk/client-s3 3.1176.0**, **@aws-sdk/s3-request-presigner 3.1176.0** (3.1177.0 was inside pnpm's 24 h window), **testcontainers 12.2.2** (API dev dependency, for RustFS in tests). The client is S3-generic: path-style, `requestChecksumCalculation`/`responseChecksumValidation: "WHEN_REQUIRED"` (the default CRC32 checksums break presigned browser PUTs and some S3 servers).
+- A `files` row (data-model columns + `status` pending/ready, `ready_at`; `uploaded_by` set null when the account goes) per object, key `ws/<workspaceId>/<fileId>`, never derived from the filename. `user.avatar_file_id` and `workspaces.avatar_file_id` reference it (set null on delete).
+- Flow: `POST /api/v1/uploads` (client UUIDv7 id, idempotent while pending) → PUT the bytes → `POST /api/v1/uploads/:id/complete`, which HEADs the object, rejects it over `MAX_UPLOAD_MB` and checks the magic bytes against the declared image type (a mismatch deletes object and row). Only the uploader can PUT or complete.
+- **Two upload modes** (`S3_DIRECT_UPLOAD`): direct = presigned PUT to the bucket (needs bucket CORS; dev RustFS gets it from `infra/scripts/rustfs-init.sh`); relay (default, prod) = the browser PUTs to `/api/v1/uploads/:id/content` and the API stores the bytes (Hono `bodyLimit`). The ticket's `upload.url` is either, so clients don't care. `S3_PUBLIC_ENDPOINT` signs URLs for a browser-reachable host when the API reaches storage on another one.
+- Downloads: `GET /api/v1/files/:id` checks access and 302s to a 10-minute presigned GET (redirect cached privately for 5 min; objects are immutable per id). Access = `workspace.view` on the file's workspace, or the file is someone's (or a workspace's) avatar, which any signed-in user may see `[assumption]`. New matrix action `workspace.uploadFile` (personal owner, team owner and member).
+- Uploads accept images only (JPEG/PNG/WebP/GIF; SVG never) until attachment phases widen `uploadMimes`. Limits: `MAX_UPLOAD_MB`, optional `MAX_WORKSPACE_STORAGE_GB` (counts every file row), `UPLOAD_RATE_LIMIT_MAX` per user per minute on reservations.
+- No storage configured → uploads and downloads answer the new error code **`UNAVAILABLE` (503)**, added to D-021's list; the API logs a warning at start instead of refusing to boot.
+- API tests start a RustFS container next to Postgres (`TEST_S3_ENDPOINT` reuses a running server); CI's e2e job runs RustFS as a service.
+Alternatives: always relaying (simpler, but the API carries every byte even where CORS works); a Caddy path proxy to OCI (breaks SigV4 host/path signing); configuring CORS on OCI through its native API (undocumented for Object Storage, couldn't confirm).
+Consequences: prod uploads pass through the API (fine at 25 MB per file on one VM). Presigned GETs against OCI are unverified until the first prod upload (runbook step). Stale pending rows and replaced avatars stay until a worker job cleans them (Backlog).
+
+## D-038 — Profile fields on the user record (M1.2)  (2026-11-26 · Accepted)
+Decision:
+- `GET/PATCH /api/v1/me` carry `firstName`, `lastName`, `avatarUrl`, `avatarFileId`, `timezone`, `weekStart`, `locale`; `image` is gone from the DTO (`avatarUrl` = uploaded photo, else the OAuth picture). Every PATCH field is optional (field-level LWW, D-006); an empty first name is refused, an empty last name allowed.
+- Accounts without first/last name (sign-up sends one `name`) get them by splitting the display name at its first space until saved. Saving either keeps Better Auth's `name` = "first last".
+- A photo must be a ready image the caller uploaded into their own personal workspace. The web crops it client-side (react-easy-crop **6.2.5**) to one 512×512 image, WebP where the engine encodes it, else JPEG (WebKit) `[assumption]`.
+- Time zones: any IANA name the runtime accepts. The web lists `Intl.supportedValuesOf("timeZone")` with legacy CLDR names mapped to current IANA ones (`Asia/Calcutta` → `Asia/Kolkata`, `platform/modernZone`), and offers "Use it" when the device's zone differs from the saved one; it never changes the zone silently `[assumption]`.
+- First day of the week: "System default" resolves through `Intl.Locale#getWeekInfo` (Monday where the engine lacks it) and is shown with the resolved day. My Week uses it, replacing D-027's Monday default.
+- `locale` is `system | en`, default now `system` (migration 0002 changes the column default).
+- Copy: "Personal info", "Upload photo / Change photo / Remove", "Crop your photo", "The email you sign in with", "Time zone" (Superlist's exact strings unchecked) `[assumption]`. The email stays read-only; changing it is Backlog.
+
+## D-039 — Client conventions added in M1.2  (2026-11-26 · Accepted)
+Decision:
+- `uuidv7()` in packages/shared (RFC 9562, `crypto.getRandomValues`) is the client id generator for new rows and `clientMutationId` (D-006).
+- `apps/web/src/platform/` holds wrapper-safe adapters: `pickFile` (hidden `<input type=file>`, works in Tauri/Capacitor webviews), `systemTimeZone`, `timeZones`, `systemLocale`, `systemFirstDay`. Native shells may swap implementations in M10/M11.
+- i18n scaffolding: `t(key, vars)` over one English catalog (`apps/web/src/i18n/en.ts`, dotted keys, `{name}` placeholders). New strings use it from M1.2; older screens move over later (Backlog). No i18n library until a second language exists.
+- `useUpdateMe(errorMessage)` is the one optimistic profile mutation (cache patch → PATCH → rollback + toast); `useSaveTheme` stays for the theme store. `workspacesQuery` is the client's workspace list.
+- `SettingsCard` lives in `apps/web/src/views/SettingsCard.tsx`; Avatar gains a 72px size.
 
 ---
 

@@ -5,9 +5,10 @@ Settings live at `/settings/:tab` and render in the main card as a title "Settin
 ## Tabs
 1. **Profile**
    - **Task activity** card: a GitHub-style heatmap of completed tasks per day over the last 12 months, grouped by month, with the accent colour for active days and the caption "N completed tasks in the last 12 months".
-   - **Personal info:** photo (upload/crop), first name, last name, primary email (read-only, muted; changing it is a support action) [Flolist: allow a change with re-verification, assumption].
+   - **Personal info:** photo (upload/crop; stored as one 512px square, D-038), first name, last name, primary email (read-only, muted; changing it is a support action) [Flolist: allow a change with re-verification, assumption; Backlog, not built in M1.2].
    - **App language:** System default / English (i18n scaffolding only for now; strings go through `t()` from day one) [assumption].
    - **First day of the week:** System default (shows the resolved day) · Monday · Sunday · Saturday. Used by the calendar, My Week and the "Next week" due date.
+   - **Time zone** [Flolist addition, assumption: Superlist sets it from the device]: a searchable IANA zone picker with each zone's current UTC offset. When the device's zone differs from the saved one, the card offers "Use it"; it never changes silently (D-038). Used for due dates, reminders and summary emails.
    - **Export account data:** "Download a .csv file with your account data" (lists, tasks, subtasks, labels, dates, completion; one CSV in a ZIP if there are several files) [Flolist extra: also JSON + Markdown export].
    - **Account deletion:** "This action is permanent and cannot be undone." A red pill opens a confirm dialog where the user types their email. It deletes personal-workspace data and leaves teams (if the user is the sole owner, they must transfer or delete the team first).
 2. **Features**

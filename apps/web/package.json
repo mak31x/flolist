@@ -21,6 +21,7 @@
     "motion": "14.14.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "react-easy-crop": "6.2.5",
     "zustand": "5.1.0"
   },
   "devDependencies": {

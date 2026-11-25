@@ -10,12 +10,16 @@ import { createAppRouter } from "./router.tsx";
 export const testMe: Me = {
   id: "0190a000-0000-7000-8000-000000000001",
   name: "Ada Lovelace",
+  firstName: "Ada",
+  lastName: "Lovelace",
   email: "ada@test.localhost",
   emailVerified: true,
-  image: null,
+  avatarUrl: null,
+  avatarFileId: null,
   theme: "system",
   timezone: "UTC",
   weekStart: "system",
+  locale: "system",
   version: 1,
 };
 

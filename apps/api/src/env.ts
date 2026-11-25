@@ -45,6 +45,30 @@ const envSchema = z
     SMTP_USER: z.string().default(""),
     SMTP_PASS: z.string().default(""),
     MAIL_FROM: z.string().min(1).default("Flolist <no-reply@flolist.localhost>"),
+    // Object storage (D-012, D-018, D-037). Uploads answer 503 until bucket + keys are set.
+    S3_ENDPOINT: z.string().default(""),
+    /** Host browsers use for presigned URLs, if it differs from S3_ENDPOINT (Docker networks). */
+    S3_PUBLIC_ENDPOINT: z.string().default(""),
+    S3_REGION: z.string().default("us-east-1"),
+    S3_BUCKET: z.string().default(""),
+    S3_ACCESS_KEY: z.string().default(""),
+    S3_SECRET_KEY: z.string().default(""),
+    /**
+     * true = browsers PUT straight to presigned URLs (the bucket needs CORS for APP_URL).
+     * false = the API relays upload bytes; works with any S3 server (D-037).
+     */
+    S3_DIRECT_UPLOAD: booleanFlag,
+    /** Per-file limit (D-013). */
+    MAX_UPLOAD_MB: z.coerce.number().positive().default(25),
+    /** Empty = unlimited (D-013). */
+    MAX_WORKSPACE_STORAGE_GB: z
+      .string()
+      .default("")
+      .transform((v) => (v.trim() === "" ? undefined : Number(v)))
+      .pipe(z.number().positive().optional()),
+    /** Upload reservations per user per window. */
+    UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+    UPLOAD_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production" && env.BETTER_AUTH_SECRET === DEV_AUTH_SECRET) {
@@ -57,6 +81,19 @@ const envSchema = z
   });
 
 export type Env = z.infer<typeof envSchema>;
+
+/** The S3 settings, or null when storage isn't configured (uploads then answer 503). */
+export function s3ConfigFrom(env: Env) {
+  if (!env.S3_ENDPOINT || !env.S3_BUCKET || !env.S3_ACCESS_KEY || !env.S3_SECRET_KEY) return null;
+  return {
+    endpoint: env.S3_ENDPOINT,
+    ...(env.S3_PUBLIC_ENDPOINT ? { publicEndpoint: env.S3_PUBLIC_ENDPOINT } : {}),
+    region: env.S3_REGION,
+    bucket: env.S3_BUCKET,
+    accessKeyId: env.S3_ACCESS_KEY,
+    secretAccessKey: env.S3_SECRET_KEY,
+  };
+}
 
 /** Validates process env at startup and fails fast with a readable message. */
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {

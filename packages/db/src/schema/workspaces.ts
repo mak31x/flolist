@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   check,
   index,
   jsonb,
@@ -12,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.ts";
 import { createdAt, id, updatedAt, version } from "./columns.ts";
+import { files } from "./files.ts";
 
 export const workspaceKinds = ["personal", "team"] as const;
 export type WorkspaceKind = (typeof workspaceKinds)[number];
@@ -28,8 +30,9 @@ export const workspaces = pgTable(
     kind: text("kind", { enum: workspaceKinds }).notNull(),
     name: text("name").notNull(),
     emoji: text("emoji"),
-    /** → files.id once the files table exists (M1.2). */
-    avatarFileId: uuid("avatar_file_id"),
+    avatarFileId: uuid("avatar_file_id").references((): AnyPgColumn => files.id, {
+      onDelete: "set null",
+    }),
     ownerId: uuid("owner_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),

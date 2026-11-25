@@ -4,12 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M1.1 Better Auth (done; PR from `phase/M1.1-auth`). Email/password sign-up with required verification, reset, sessions, bearer tokens, organization plugin (no user-created teams until M7.1), personal workspace on sign-up, sign-in screens, protected routes, theme on the user record (D-033–D-035).
-- **State:** auth at `/api/auth/*` (Better Auth 1.7.28 on Drizzle, UUIDv7 ids); `GET/PATCH /api/v1/me` (repairs a missing personal workspace); public `GET /api/config`; stricter per-IP limit on sign-in/sign-up/reset/verify; Origin check on cookie mutations to `/api/v1`. Web: auth screens in `apps/web/src/features/auth`, app views under the `_app` layout (`meQuery` is the session source). `Button`/`TextField` in packages/ui.
-- **Run / verify:** `pnpm dev`; sign up at http://localhost:5174/signup, the link arrives in Mailpit (http://localhost:8026). `pnpm check`; `pnpm test:e2e` (needs `pnpm infra:up`; CI job `e2e` runs it with service containers and gates deploys).
-- **Prod before merging:** `BETTER_AUTH_SECRET` and the Hostinger SMTP keys must be in `/opt/flolist/.env` (docs/deploy-oracle.md → Auth and email env), or the deploy rolls back / nobody can verify. Google stays off until the owner creates the OAuth client (Backlog).
-- **Gotchas:** every importer of drizzle-orm needs the same peers (kysely is in packages/db for that, D-033). Better Auth runs `user.create.after` only after commit, so sign-up side effects must be idempotent. `/api/v1` mutations from the browser need the `Origin` header (fetch sends it). Unverified log-in re-sends the verification link (`sendOnSignIn`). Migrations stay forward-only.
-- **Next:** M1.2 Profile settings + files (name, photo, timezone, first day of week; presigned uploads to RustFS/OCI). Extend `updateMeSchema` and the `/api/v1/me` PATCH; the files table backs `user.avatar_file_id`.
+- **Last phase:** M1.2 Profile settings + files (done; PR from `phase/M1.2-profile-files`). Settings → Profile (photo with crop, first/last name, time zone, first day of week, app language), a files service, My Week honours the week start (D-037–D-039).
+- **State:** `files` table (pending → ready) + `user/workspaces.avatar_file_id` FKs. `POST /api/v1/uploads` reserves and returns a PUT target; `PUT /api/v1/uploads/:id/content` (relay mode) or a presigned URL (direct mode, `S3_DIRECT_UPLOAD=true`); `POST …/:id/complete` checks size + magic bytes; `GET /api/v1/files/:id` → 302 to a presigned GET. `PATCH /api/v1/me` takes any profile field. Storage is `apps/api/src/storage` (AWS SDK v3, S3-generic). Web: `features/profile`, `features/files/upload.ts`, `platform/` adapters, `i18n/t()`, `workspacesQuery`, `useUpdateMe` (optimistic).
+- **Run / verify:** `pnpm infra:up` (now also sets bucket CORS), `pnpm dev`, then http://localhost:5174/settings/profile. `pnpm check` (API tests start Postgres + RustFS containers); `pnpm test:e2e` (profile flow included; CI's e2e job has a RustFS service).
+- **Prod before merging:** create the OCI bucket + Customer Secret Keys and set `S3_*` with `S3_DIRECT_UPLOAD=false` in `/opt/flolist/.env` (docs/deploy-oracle.md → Files env), then upload a photo on the live site. Without them uploads answer 503; nothing else breaks. Presigned GETs against OCI are untested.
+- **Gotchas:** V8/WebKit report legacy zone names (Asia/Calcutta); `platform/modernZone()` maps them. AWS SDK checksums are off (`WHEN_REQUIRED`) or presigned PUTs break. Uploads are images only (`uploadMimes`). Profile names are keyed on their saved value, so a remote change resets the field. Stale `pending` files aren't cleaned up yet (Backlog). Migrations stay forward-only.
+- **Next:** M2.1 Lists + sidebar + live sync (lists CRUD, sections, sidebar reorder, All lists, WebSocket hub v1 + outbox + `applyChange`). `uuidv7()` from packages/shared is the client id generator.
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -47,9 +47,10 @@ Specs: architecture.md (Security), decisions D-005, spec/settings-and-account.md
 - [x] Email/password + verification + reset, Google OAuth, sessions, bearer plugin enabled (for native later), organization plugin configured
 - [x] Login/sign-up screens; protected routes; personal workspace on sign-up (the "Getting started" list moved to M3.1); SMTP via env (Hostinger in prod, D-032)
 Done when: e2e covers sign-up → verify → land in Inbox. Google sign-in is wired and turns on when `GOOGLE_CLIENT_ID/SECRET` are set; it hasn't been exercised against Google yet (no OAuth client exists; Backlog).
-### M1.2 Profile settings + files `[ ]`
+### M1.2 Profile settings + files `[x]`
 Specs: spec/settings-and-account.md (Profile)
-- [ ] Settings layout with pill tabs; Profile (name, photo, timezone, first day of week, language placeholder); files service (presigned upload/download)
+- [x] Settings layout with pill tabs; Profile (name, photo, timezone, first day of week, language placeholder); files service (presigned upload/download; relay upload for OCI, D-037)
+Done when: e2e edits the profile, uploads a photo and sees it all after a reload. The activity heatmap, export and account deletion stay in M6.3.
 
 ## M2 — Lists and the block editor
 ### M2.1 Lists + sidebar + live sync `[ ]`
@@ -144,7 +145,6 @@ Done when (M4): a full day of work is possible without the mouse.
 - Multi-window in the desktop app
 - Team admin role (beyond owner/member)
 - i18n (Hindi/Gujarati)
-- Add Playwright e2e (`pnpm test:e2e`) to the CI workflow once the first critical flow exists (M1.1 sign-up)
 - Move to TypeScript 7 (native) once typescript-eslint supports it (D-017)
 - Move the rate limiter to Postgres/Redis if the API ever runs on more than one node (D-023)
 - Code-split the web bundle (route-level lazy imports) — 614 KB after M0.3; M0.4 didn't change it, so settle in M4 or M8.2
@@ -155,3 +155,9 @@ Done when (M4): a full day of work is possible without the mouse.
 - Replace the temporary startrips.in sender with a Flolist address (D-032)
 - Move transactional email to a dedicated provider (Resend/Brevo/SES) before company-wide use or high-volume digests (D-032)
 - Let the VM pull from GHCR with a read-only token instead of a public package, if the repo ever goes private (D-030)
+- Clean up stale `pending` files and orphaned objects (replaced avatars) with a worker job once pg-boss runs (D-037)
+- A dedicated OCI IAM user whose Customer Secret Key can reach only the Flolist bucket (D-037)
+- If OCI rejects presigned GETs, relay downloads through the API too (D-037)
+- Move the older screens' inline English strings to `t()` (D-039)
+- Change the primary email with re-verification (settings-and-account.md marks it a Flolist extra)
+- Server-side image resizing/thumbnails in the worker for uploads (architecture.md → Uploads), with list covers
