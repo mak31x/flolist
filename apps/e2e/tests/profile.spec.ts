@@ -65,7 +65,7 @@ test("edit the profile, upload a photo, and it all survives a reload", async ({ 
   const photo = page.getByRole("img", { name: "Augusta King" }).first();
   await expect(photo).toBeVisible();
   await expect
-    .poll(() => photo.evaluate((img) => (img as { naturalWidth: number }).naturalWidth))
+    .poll(() => photo.evaluate((img) => (img as HTMLImageElement).naturalWidth))
     .toBe(512);
 
   // My Week starts on Saturday now (the browser locale alone would say Sunday).

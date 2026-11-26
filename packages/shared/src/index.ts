@@ -8,3 +8,5 @@ export * from "./uuid.ts";
 export * from "./positions.ts";
 export * from "./lists.ts";
 export * from "./sync.ts";
+export * from "./blocks.ts";
+export * from "./markdown.ts";

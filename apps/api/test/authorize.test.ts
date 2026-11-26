@@ -115,6 +115,18 @@ const listRouteFor: Record<ListAction, (id: string) => [string, RequestInit]> = 
   "list.manage": (id) => [`/api/v1/lists/${id}`, send("DELETE", mutation())],
 };
 
+/** Block routes resolve through their list: reading is `list.view`, any batch is `list.edit`. */
+const blockRouteFor: Partial<Record<ListAction, (id: string) => [string, RequestInit]>> = {
+  "list.view": (id) => [`/api/v1/lists/${id}/blocks`, {}],
+  "list.edit": (id) => [
+    `/api/v1/lists/${id}/blocks/batch`,
+    send("POST", {
+      ...mutation(),
+      ops: [{ op: "upsert", id: crypto.randomUUID(), type: "paragraph", position: "a0" }],
+    }),
+  ],
+};
+
 const sectionRouteFor: Partial<Record<SectionAction, (id: string) => [string, RequestInit]>> = {
   "section.update": (id) => [
     `/api/v1/sections/${id}`,
@@ -127,6 +139,16 @@ describe("list and section routes against the permission fixtures", () => {
   it.each(listPermissionFixtures.map((f) => [f.name, f] as const))("%s", async (_name, f) => {
     const { actor, list } = await buildListFixture(t.db, f.setup);
     const [path, init] = listRouteFor[f.action](list.id);
+    const res = await testApp(t.db).request(path, as(actor, init));
+    expect(res.status).toBe(statusFor[f.expected]);
+  });
+
+  const blockCases = listPermissionFixtures.filter((f) => blockRouteFor[f.action]);
+  it.each(blockCases.map((f) => [`blocks: ${f.name}`, f] as const))("%s", async (_name, f) => {
+    const { actor, list } = await buildListFixture(t.db, f.setup);
+    const route = blockRouteFor[f.action];
+    if (!route) throw new Error("unreachable");
+    const [path, init] = route(list.id);
     const res = await testApp(t.db).request(path, as(actor, init));
     expect(res.status).toBe(statusFor[f.expected]);
   });

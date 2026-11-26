@@ -20,7 +20,11 @@ export const workspaceActions = [
 ] as const;
 export type WorkspaceAction = (typeof workspaceActions)[number];
 
-/** `manage` = move between workspaces and delete (data-model.md → canManageList). */
+/**
+ * `manage` = move between workspaces and delete (data-model.md → canManageList).
+ * Blocks have no actions of their own: reading a container's blocks is `list.view` and every
+ * block batch is `list.edit` on the list (resolved through its root).
+ */
 export const listActions = ["list.view", "list.edit", "list.manage"] as const;
 export type ListAction = (typeof listActions)[number];
 

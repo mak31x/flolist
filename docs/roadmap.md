@@ -4,12 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M2.1 Lists + sidebar + live sync (done; PR from `phase/M2.1-lists-sidebar-sync`). Lists CRUD, emoji picker, star/unstar, sections, sidebar drag reorder, All lists page, WebSocket live sync (D-040–D-044).
-- **State:** migration 0003 adds `lists`, `list_view_prefs` (holds `last_opened_at`), `sections`, `sidebar_entries`, `outbox`, `applied_mutations`. Routes: `/api/v1/lists` (GET, POST, GET/PATCH/DELETE `/:id`, POST `/:id/open`), `/api/v1/sections`, `/api/v1/sidebar` (+ `PUT/DELETE /entries/:listId`). Every mutation goes through `runMutation()` (apps/api/src/sync/mutation.ts): idempotent per `clientMutationId`, `emit()` writes outbox rows in the same tx, `afterMutation` kicks the drainer → `Hub` → `/ws`.
-- **Web:** `features/lists` (api, cache helpers, `useOptimistic` mutations, SidebarLists with dnd-kit, ListPage, AllListsPage, QuickCreate), `features/sync` (LiveSocket, `applyChange`, `useListChannel`). Lists are private to their creator; only Personal is used (sharing = M7).
-- **Run / verify:** `pnpm infra:up`, `pnpm dev`, open two windows on http://localhost:5174 and create/rename/drag lists. `pnpm check`; `pnpm test:e2e` (lists.spec.ts runs two browser contexts).
-- **Gotchas:** positions are fractional-indexing keys compared byte-wise: sort with `collate "C"` in SQL and `compareKeys` in JS, never `localeCompare`. Radix menus must `preventDefault` `onCloseAutoFocus` when an action focuses an input (new list title, inline rename). Client skips socket events while a mutation with the same query key is pending, then invalidates. `/api/v1/*` now 401s before validation. The bundled API crashes in dev on pino-pretty (`__dirname`); prod mode is fine. Sections have no keyboard reorder yet (Backlog). Emoji data is self-hosted at `/emojibase` (Vite plugin).
-- **Next:** M2.2 Block editor core (blocks API with versions; per-block Tiptap, keyboard controller, slash menu, block drag, undo/redo). Reuse `runMutation`/`emit`, `list:<rootId>` channels and `applyChange`.
+- **Last phase:** M2.2 Block editor core (done; PR from `phase/M2.2-block-editor`). Blocks API, per-block Tiptap editor, keyboard controller, Markdown shortcuts, slash menu, block handle + drag, block selection, clipboard, undo/redo (D-045–D-049).
+- **State:** migration 0004 adds `blocks` (`position text collate "C"`; no task/sublist/file columns yet). Routes `GET /api/v1/lists/:id/blocks` and `POST /lists/:id/blocks/batch` (upsert/move/delete; upsert restores soft-deleted = undo). Shared: `blocks.ts` (schemas, `resolveBlockShape`, `numberedLabels`), `markdown.ts` (blocks ⇄ Markdown, → HTML).
+- **Web `features/editor`:** `BlockStore` (store.ts: optimistic queue, merge, retry/rollback, `receive`/`mergeFetched`), `EditorCommands` (commands.ts: undo stack), `keyboard.ts` (Enter/Backspace/arrows/Tab, shortcuts, `turnInto`, selection, paste), `focus.ts` (editor registry, caret placement), `clipboard.ts`, `use-slash.ts`, `BlockEditor`/`BlockRow`/`InlineEditor`/`BlockHandle`.
+- **Run / verify:** `pnpm infra:up`, `pnpm dev`, open a list and write with the keyboard only (`##`, `- `, `1. `, `> `, `---`, `/`, Tab, Esc + Shift+↓). `pnpm check`; `pnpm test:e2e` (editor.spec.ts types at full speed, reloads, checks a second window).
+- **Gotchas:** every editor change must go through `ctx.commands.run` (undo) → `store.apply`, never `setQueryData`. A focused Tiptap editor ignores cache updates: commands that change its text call `setText`/`syncEditors`. TanStack notifications run in a microtask (main.tsx) — keep it, Enter→focus depends on it. The built-in browser pane throttles timers when hidden, so automated key bursts there misbehave; trust Playwright. Auth sign-up is rate-limited (10/min/IP): repeated e2e runs hit 429. Playwright's "Desktop Chrome" may not be Apple: use the page's Mod key (`modKey()` in editor.spec.ts).
+- **Next:** M2.3 Media blocks, covers, sublists, list menu (add `image`/`attachment`/`sublist` types to `BLOCK_TYPES`, the DB CHECK and `SLASH_ITEMS`; `file_id`/`sublist_id` columns; `lists.parent_block_id` FK).
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -58,10 +58,10 @@ Specs: spec/lists-and-blocks.md (Lists, Sections), spec/views.md (Sidebar, All l
 - [x] Lists CRUD, emoji picker, star/unstar, sections CRUD, sidebar drag reorder, All lists page
 - [x] WebSocket hub v1 + outbox + client `applyChange`
 Done when: lists and sections persist, reorder, and sync live between two browser windows.
-### M2.2 Block editor core `[ ]`
+### M2.2 Block editor core `[x]`
 Specs: spec/lists-and-blocks.md (Block types, Editor behaviour), decisions D-007
-- [ ] Blocks API (batch upsert/move/delete with versions); paragraph, H1–H3, bullet, numbered, quote, divider
-- [ ] Per-block Tiptap, keyboard controller, markdown shortcuts, slash menu, block drag, undo/redo, copy/paste as Markdown
+- [x] Blocks API (batch upsert/move/delete with versions); paragraph, H1–H3, bullet, numbered, quote, divider
+- [x] Per-block Tiptap, keyboard controller, markdown shortcuts, slash menu, block drag, undo/redo, copy/paste as Markdown
 Done when: you can write a structured doc quickly using only the keyboard, and it survives a reload.
 ### M2.3 Media blocks, covers, sublists, list menu `[ ]`
 Specs: spec/lists-and-blocks.md
@@ -161,5 +161,9 @@ Done when (M4): a full day of work is possible without the mouse.
 - Move the older screens' inline English strings to `t()` (D-039)
 - Change the primary email with re-verification (settings-and-account.md marks it a Flolist extra)
 - Server-side image resizing/thumbnails in the worker for uploads (architecture.md → Uploads), with list covers
+- Block handle on phones (long-press menu / drag) — hidden below 768px in M2.2 (D-047)
+- Shift+click to extend a block selection with the mouse (D-048)
+- Lazy Tiptap (static HTML until focus) together with virtualization in M8.2, keeping iOS keyboard focus working (D-047)
+- Indenting a list item could carry its deeper children along (outline behaviour); M2.2 moves only the block
 - Keyboard reordering for sidebar sections (lists already reorder by keyboard; sections are mouse/touch only, D-044)
 - Fix `pnpm --filter api` bundled build crashing under dev NODE_ENV (pino-pretty transport resolves `__dirname`)

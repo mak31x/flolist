@@ -1,0 +1,306 @@
+import { z } from "zod";
+import { positionSchema } from "./positions.ts";
+import { clientMutationSchema } from "./lists.ts";
+
+/**
+ * Blocks (D-007, lists-and-blocks.md → Block types). A container (a list now, a task body from
+ * M3.1) holds an ordered list of typed blocks. Text blocks store Tiptap's inline JSON, so the
+ * editor can load and save it without conversion.
+ */
+
+/** Block types built so far. `task`, `sublist`, `image` and `attachment` arrive with M2.3/M3.1. */
+export const TEXT_BLOCK_TYPES = [
+  "paragraph",
+  "heading1",
+  "heading2",
+  "heading3",
+  "bullet",
+  "numbered",
+  "quote",
+] as const;
+export const BLOCK_TYPES = [...TEXT_BLOCK_TYPES, "divider"] as const;
+
+export const textBlockTypeSchema = z.enum(TEXT_BLOCK_TYPES);
+export type TextBlockType = z.infer<typeof textBlockTypeSchema>;
+export const blockTypeSchema = z.enum(BLOCK_TYPES);
+export type BlockType = z.infer<typeof blockTypeSchema>;
+
+export function isTextBlockType(type: BlockType): type is TextBlockType {
+  return type !== "divider";
+}
+
+/** Types that take an indent level (Tab / Shift+Tab). */
+export function isIndentable(type: BlockType): boolean {
+  return type === "bullet" || type === "numbered";
+}
+
+/** Deepest indent level for bullets and numbered items `[assumption]`. */
+export const MAX_INDENT = 4;
+/** Characters of text per block; a long pasted document is split into many blocks anyway. */
+export const MAX_BLOCK_TEXT = 20_000;
+/** Operations per batch request. */
+export const MAX_BATCH_OPS = 500;
+
+// Inline content: Tiptap's JSON for the children of a paragraph-like node.
+
+const hrefSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((href) => /^(https?:|mailto:)/i.test(href), { error: "Links must be http(s) or mailto" });
+
+export const simpleMarkTypeSchema = z.enum(["bold", "italic", "strike", "code"]);
+export type SimpleMarkType = z.infer<typeof simpleMarkTypeSchema>;
+
+export const markSchema = z.union([
+  z.object({ type: simpleMarkTypeSchema }),
+  z.object({ type: z.literal("link"), attrs: z.object({ href: hrefSchema }) }),
+]);
+export type Mark = z.infer<typeof markSchema>;
+
+export const textNodeSchema = z.object({
+  type: z.literal("text"),
+  text: z.string().min(1),
+  marks: z.array(markSchema).max(5).optional(),
+});
+export type TextNode = z.infer<typeof textNodeSchema>;
+
+export const inlineNodeSchema = z.union([
+  textNodeSchema,
+  z.object({ type: z.literal("hardBreak") }),
+]);
+export type InlineNode = z.infer<typeof inlineNodeSchema>;
+
+export const inlineContentSchema = z
+  .array(inlineNodeSchema)
+  .max(2000)
+  .refine((nodes) => inlineLength(nodes) <= MAX_BLOCK_TEXT, {
+    error: `A block holds at most ${String(MAX_BLOCK_TEXT)} characters`,
+  });
+
+/** Divider colours `[assumption: 6]`; the theme maps each to a token. */
+export const DIVIDER_COLORS = ["gray", "red", "orange", "green", "blue", "purple"] as const;
+export const dividerColorSchema = z.enum(DIVIDER_COLORS);
+export type DividerColor = z.infer<typeof dividerColorSchema>;
+
+export const textContentSchema = z.object({ inline: inlineContentSchema });
+export type TextContent = z.infer<typeof textContentSchema>;
+export const dividerContentSchema = z.object({ color: dividerColorSchema });
+export type DividerContent = z.infer<typeof dividerContentSchema>;
+export const blockContentSchema = z.union([textContentSchema, dividerContentSchema]);
+export type BlockContent = z.infer<typeof blockContentSchema>;
+
+/** The content every new block of a type starts with. */
+export function emptyContent(type: BlockType): BlockContent {
+  return type === "divider" ? { color: "gray" } : { inline: [] };
+}
+
+/** Does this content fit this type? (Text types need `inline`, dividers need `color`.) */
+export function contentMatchesType(type: BlockType, content: BlockContent): boolean {
+  return isTextBlockType(type) ? "inline" in content : "color" in content;
+}
+
+export const containerTypeSchema = z.enum(["list", "task"]);
+export type ContainerType = z.infer<typeof containerTypeSchema>;
+
+export const blockSchema = z.object({
+  id: z.uuid(),
+  containerType: containerTypeSchema,
+  containerId: z.uuid(),
+  rootListId: z.uuid(),
+  position: z.string(),
+  type: blockTypeSchema,
+  indent: z.number().int().min(0).max(MAX_INDENT),
+  content: blockContentSchema,
+  createdBy: z.uuid().nullable(),
+  version: z.number().int(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type Block = z.infer<typeof blockSchema>;
+
+/** `GET /lists/:id/blocks`: the list's live blocks, sorted by position. */
+export const blockPageSchema = z.object({ items: z.array(blockSchema) });
+export type BlockPage = z.infer<typeof blockPageSchema>;
+
+// Batch mutations (`POST /lists/:id/blocks/batch`). One request = one undoable editor command,
+// applied atomically. Field-level last-write-wins (D-006): an upsert changes only what it sends.
+
+const indentSchema = z.number().int().min(0).max(MAX_INDENT);
+
+export const upsertBlockOpSchema = z.object({
+  op: z.literal("upsert"),
+  /** Client-generated UUIDv7 for a new block (D-006). */
+  id: z.uuid(),
+  /** Required when the block doesn't exist yet. */
+  type: blockTypeSchema.optional(),
+  position: positionSchema.optional(),
+  indent: indentSchema.optional(),
+  content: blockContentSchema.optional(),
+  /** The version the client last saw (accepted, not enforced yet; D-043). */
+  baseVersion: z.number().int().positive().optional(),
+});
+export type UpsertBlockOp = z.infer<typeof upsertBlockOpSchema>;
+
+export const moveBlockOpSchema = z.object({
+  op: z.literal("move"),
+  id: z.uuid(),
+  position: positionSchema,
+  /** A new indent level, for drags that change nesting. */
+  indent: indentSchema.optional(),
+});
+export type MoveBlockOp = z.infer<typeof moveBlockOpSchema>;
+
+export const deleteBlockOpSchema = z.object({ op: z.literal("delete"), id: z.uuid() });
+export type DeleteBlockOp = z.infer<typeof deleteBlockOpSchema>;
+
+export const blockOpSchema = z.discriminatedUnion("op", [
+  upsertBlockOpSchema,
+  moveBlockOpSchema,
+  deleteBlockOpSchema,
+]);
+export type BlockOp = z.infer<typeof blockOpSchema>;
+
+export const blockBatchSchema = clientMutationSchema.extend({
+  ops: z
+    .array(blockOpSchema)
+    .min(1)
+    .max(MAX_BATCH_OPS)
+    .refine((ops) => new Set(ops.map((o) => o.id)).size === ops.length, {
+      error: "Each block may appear once per batch",
+    }),
+});
+export type BlockBatch = z.infer<typeof blockBatchSchema>;
+
+/** The batch's effect: every changed block as it now is, and the ids that were deleted. */
+export const blockBatchResultSchema = z.object({
+  blocks: z.array(blockSchema),
+  deleted: z.array(z.uuid()),
+});
+export type BlockBatchResult = z.infer<typeof blockBatchResultSchema>;
+
+// Inline helpers shared by the editor, the serializers and the server.
+
+export function inlineLength(nodes: readonly InlineNode[]): number {
+  let n = 0;
+  for (const node of nodes) n += node.type === "text" ? node.text.length : 1;
+  return n;
+}
+
+/** Plain text, with hard breaks as "\n". */
+export function inlineText(nodes: readonly InlineNode[]): string {
+  return nodes.map((node) => (node.type === "text" ? node.text : "\n")).join("");
+}
+
+function markKey(mark: Mark): string {
+  return mark.type === "link" ? `link:${mark.attrs.href}` : mark.type;
+}
+
+const MARK_ORDER: Record<Mark["type"], number> = {
+  link: 0,
+  bold: 1,
+  italic: 2,
+  strike: 3,
+  code: 4,
+};
+
+/** Marks in a canonical order (link outermost, code innermost), without duplicates. */
+export function sortMarks(marks: readonly Mark[]): Mark[] {
+  const seen = new Map<Mark["type"], Mark>();
+  for (const mark of marks) if (!seen.has(mark.type)) seen.set(mark.type, mark);
+  return [...seen.values()].sort((a, b) => MARK_ORDER[a.type] - MARK_ORDER[b.type]);
+}
+
+export function sameMarks(a: readonly Mark[] = [], b: readonly Mark[] = []): boolean {
+  if (a.length !== b.length) return false;
+  const keys = new Set(a.map(markKey));
+  return b.every((m) => keys.has(markKey(m)));
+}
+
+/** Drops empty text, merges neighbours with equal marks and sorts marks. */
+export function normalizeInline(nodes: readonly InlineNode[]): InlineNode[] {
+  const out: InlineNode[] = [];
+  for (const node of nodes) {
+    if (node.type === "hardBreak") {
+      out.push({ type: "hardBreak" });
+      continue;
+    }
+    if (node.text === "") continue;
+    const marks = sortMarks(node.marks ?? []);
+    const last = out.at(-1);
+    if (last?.type === "text" && sameMarks(last.marks, marks)) {
+      last.text += node.text;
+      continue;
+    }
+    out.push(
+      marks.length > 0
+        ? { type: "text", text: node.text, marks }
+        : { type: "text", text: node.text },
+    );
+  }
+  return out;
+}
+
+/** A plain-text run, for tests and simple content. */
+export function textInline(text: string): InlineNode[] {
+  return text === "" ? [] : [{ type: "text", text }];
+}
+
+/**
+ * The number each `numbered` block shows: counted per contiguous run at its own indent level.
+ * Deeper list items don't break a run above them; a shallower item, a bullet at the same level
+ * or any other block type does.
+ */
+export function numberedLabels(
+  blocks: readonly { id: string; type: BlockType; indent: number }[],
+): Map<string, number> {
+  const labels = new Map<string, number>();
+  const counters: number[] = [];
+  for (const block of blocks) {
+    if (!isIndentable(block.type)) {
+      counters.length = 0;
+      continue;
+    }
+    counters.length = Math.min(counters.length, block.indent + 1);
+    if (block.type === "numbered") {
+      const next = (counters[block.indent] ?? 0) + 1;
+      counters[block.indent] = next;
+      labels.set(block.id, next);
+    } else {
+      counters[block.indent] = 0;
+    }
+  }
+  return labels;
+}
+
+export interface BlockShape {
+  type: BlockType;
+  indent: number;
+  content: BlockContent;
+}
+
+export type ShapeResult = { ok: true; shape: BlockShape } | { ok: false; error: string };
+
+/**
+ * The type, indent and content a block ends up with when `fields` are applied (the server and
+ * the optimistic client use the same rule). Changing the type keeps the content when it still
+ * fits (text → text) and resets it otherwise; types that can't indent are flattened to 0.
+ */
+export function resolveBlockShape(
+  current: BlockShape | null,
+  fields: {
+    type?: BlockType | undefined;
+    indent?: number | undefined;
+    content?: BlockContent | undefined;
+  },
+): ShapeResult {
+  const type = fields.type ?? current?.type;
+  if (!type) return { ok: false, error: "A new block needs a type and a position" };
+  let content = fields.content ?? current?.content ?? emptyContent(type);
+  if (!contentMatchesType(type, content)) {
+    if (fields.content) return { ok: false, error: `This content doesn't fit a ${type} block` };
+    content = emptyContent(type);
+  }
+  const indent = isIndentable(type) ? (fields.indent ?? current?.indent ?? 0) : 0;
+  return { ok: true, shape: { type, indent, content } };
+}
