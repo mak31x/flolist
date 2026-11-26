@@ -77,6 +77,15 @@ function upsert(ctx: KeyContext, block: Block, fields: BlockFields): LocalOp {
   };
 }
 
+/**
+ * The block as the store has it now. Rows render a moment after a command applies (TanStack
+ * notifies in a microtask, React renders that at default priority), so a fast next key can
+ * arrive with the row's previous props, e.g. still "paragraph" right after "- " made it a
+ * bullet. Key handling must never act on that stale copy.
+ */
+const current = (ctx: KeyContext, block: Block): Block =>
+  ctx.rows().find((b) => b.id === block.id) ?? block;
+
 function neighbours(ctx: KeyContext, id: string) {
   const rows = ctx.rows();
   const index = rows.findIndex((b) => b.id === id);
@@ -402,10 +411,11 @@ export function pasteAfterSelection(ctx: KeyContext, drafts: readonly BlockDraft
  */
 export function pasteIntoBlock(
   ctx: KeyContext,
-  block: Block,
+  rendered: Block,
   editor: Editor,
   drafts: readonly BlockDraft[],
 ): void {
+  const block = current(ctx, rendered);
   const [first, ...rest] = drafts;
   if (!first) return;
   const { before, after } = splitText(editor);
@@ -587,11 +597,12 @@ function headOnEdgeLine(editor: Editor, edge: "first" | "last"): boolean {
  */
 export function handleBlockKey(
   ctx: KeyContext,
-  block: Block,
+  rendered: Block,
   event: KeyboardEvent,
   editor: Editor,
 ): boolean {
   if (event.isComposing) return false;
+  const block = current(ctx, rendered);
   if (ctx.slash.onKey(block, event)) return true;
   if (history(ctx, event)) return true;
   if (startSelection(ctx, block, event, editor)) return true;
@@ -648,7 +659,8 @@ export function handleBlockKey(
 }
 
 /** Keys on a focused divider, media or sublist block: move, delete, or open a paragraph below. */
-export function handleDividerKey(ctx: KeyContext, block: Block, event: KeyboardEvent): boolean {
+export function handleDividerKey(ctx: KeyContext, rendered: Block, event: KeyboardEvent): boolean {
+  const block = current(ctx, rendered);
   if (history(ctx, event)) return true;
   if (startSelection(ctx, block, event, null)) return true;
   if (isMod(event) || event.altKey || event.shiftKey) return false;
@@ -693,7 +705,8 @@ export function handleDividerKey(ctx: KeyContext, block: Block, event: KeyboardE
 }
 
 /** The block menu's actions (Turn into, divider colour, Duplicate, Delete). */
-export function blockAction(ctx: KeyContext, block: Block, action: BlockAction): void {
+export function blockAction(ctx: KeyContext, rendered: Block, action: BlockAction): void {
+  const block = current(ctx, rendered);
   const { prev, next } = neighbours(ctx, block.id);
   switch (action.kind) {
     case "turnInto":

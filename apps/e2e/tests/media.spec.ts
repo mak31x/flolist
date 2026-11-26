@@ -42,7 +42,7 @@ async function newList(page: Page, title: string) {
     .getByRole("button", { name: "Create" })
     .click();
   await page.getByRole("menuitem", { name: "New list" }).click();
-  const field = page.getByRole("textbox", { name: "List title" });
+  const field = page.getByRole("textbox", { name: "List title", exact: true });
   await expect(field).toBeFocused();
   await field.fill(title);
   await page.keyboard.press("Enter");
@@ -103,7 +103,9 @@ test("sublists, images, attachments, covers and duplicates", async ({ page }) =>
   // The sublist opens as its own page with a breadcrumb back to its parent.
   await page.getByRole("button", { name: "Open Packing" }).click();
   await expect(page).toHaveURL(new RegExp(`/lists/${sublistId}$`));
-  await expect(page.getByRole("textbox", { name: "List title" })).toHaveValue("Packing");
+  await expect(page.getByRole("textbox", { name: "List title", exact: true })).toHaveValue(
+    "Packing",
+  );
   const crumbs = page.getByRole("navigation", { name: "Parent lists" });
   await expect(crumbs.getByText("Packing")).toHaveAttribute("aria-current", "page");
   await crumbs.getByRole("link", { name: "Trip" }).click();
@@ -135,7 +137,9 @@ test("sublists, images, attachments, covers and duplicates", async ({ page }) =>
   // Duplicate list: an exact copy, sublist included, titled "(copy)".
   await page.getByRole("button", { name: "List actions" }).click();
   await page.getByRole("menuitem", { name: "Duplicate list" }).click();
-  await expect(page.getByRole("textbox", { name: "List title" })).toHaveValue("Trip (copy)");
+  await expect(page.getByRole("textbox", { name: "List title", exact: true })).toHaveValue(
+    "Trip (copy)",
+  );
   const copyId = listIdOf(page);
   expect(copyId).not.toBe(listId);
   const copied = await savedBlocks(page, copyId);
@@ -171,7 +175,7 @@ test("dragging a block onto a sublist row moves it into the sublist", async ({ p
   await page.mouse.move(to.x + 20, to.y + to.height / 2, { steps: 12 });
   await page.mouse.up();
 
-  await expect(page.getByText("Moved 1 block(s)")).toBeVisible();
+  await expect(page.getByText("Moved 1 block(s)", { exact: true })).toBeVisible();
   await expect
     .poll(async () => (await savedBlocks(page, listId)).map((b) => b.type))
     .toEqual(["sublist", "paragraph"]);
