@@ -8,6 +8,7 @@ import {
   S3ServiceException,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { GENERIC_MIME, isInlineImage } from "@flolist/shared";
 
 /**
  * Object storage behind presigned URLs (D-012, D-018, D-037). S3-generic on purpose:
@@ -57,9 +58,14 @@ function client(endpoint: string, cfg: S3Config): S3Client {
 }
 
 /** RFC 6266 `inline` disposition with an ASCII fallback and a UTF-8 filename. */
-export function contentDisposition(filename: string): string {
+/**
+ * Only the inline image types (checked by magic bytes on upload) open in the browser; every
+ * other file downloads, so an uploaded HTML or SVG file never renders from the bucket.
+ */
+export function contentDisposition(filename: string, inline: boolean): string {
   const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, "_");
-  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  const kind = inline ? "inline" : "attachment";
+  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 export function createS3Storage(cfg: S3Config): Storage {
@@ -83,8 +89,9 @@ export function createS3Storage(cfg: S3Config): Storage {
         new GetObjectCommand({
           Bucket,
           Key: key,
-          ResponseContentType: mime,
-          ResponseContentDisposition: contentDisposition(filename),
+          // Non-images are served as opaque bytes, whatever type was declared.
+          ResponseContentType: isInlineImage(mime) ? mime : GENERIC_MIME,
+          ResponseContentDisposition: contentDisposition(filename, isInlineImage(mime)),
           ResponseCacheControl: "private, max-age=3600, immutable",
         }),
         { expiresIn },

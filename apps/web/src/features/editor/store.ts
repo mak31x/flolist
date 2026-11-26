@@ -13,8 +13,13 @@ import { ApiRequestError, type ApiOptions } from "../../lib/api.ts";
 import { blocksApi, blocksKey } from "./api.ts";
 import { removeBlock, sortBlocks, upsertBlock } from "./cache.ts";
 
-/** The editable fields of a block. */
-export type BlockFields = Partial<Pick<Block, "type" | "position" | "indent" | "content">>;
+/**
+ * The editable fields of a block. `fileId` belongs to media blocks; `sublistId` is set once,
+ * when a sublist block is created (the server creates the child list with it).
+ */
+export type BlockFields = Partial<
+  Pick<Block, "type" | "position" | "indent" | "content" | "fileId" | "sublistId">
+>;
 
 /** One local change. Moves are upserts of `position`/`indent`. */
 export type LocalOp =
@@ -41,7 +46,7 @@ export interface BlockStoreOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const SHAPE_KEYS = ["type", "position", "indent", "content"] as const;
+const SHAPE_KEYS = ["type", "position", "indent", "content", "fileId"] as const;
 /** `keepalive` requests are capped at 64 KB by browsers. */
 const KEEPALIVE_LIMIT = 60_000;
 
@@ -50,7 +55,21 @@ const fullFields = (b: Block): BlockFields => ({
   position: b.position,
   indent: b.indent,
   content: b.content,
+  ...(b.fileId ? { fileId: b.fileId } : {}),
+  ...(b.sublistId ? { sublistId: b.sublistId } : {}),
 });
+
+/** A queued upsert as the batch API takes it (`sublistId` → `sublist`). */
+function upsertOp(id: string, fields: BlockFields): BlockOp {
+  const { sublistId, fileId, ...rest } = fields;
+  return {
+    op: "upsert",
+    id,
+    ...rest,
+    ...(fileId ? { fileId } : {}),
+    ...(sublistId ? { sublist: { id: sublistId, title: "" } } : {}),
+  };
+}
 
 const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
@@ -154,7 +173,7 @@ export class BlockStore {
       if (!result.ok) throw new Error(result.error);
       if (!position) throw new Error("A new block needs a type and a position");
       const next: Block = prev
-        ? { ...prev, ...result.shape, position }
+        ? { ...prev, ...result.shape, position, fileId: op.fields.fileId ?? prev.fileId }
         : {
             id: op.id,
             containerType: "list",
@@ -162,6 +181,8 @@ export class BlockStore {
             rootListId: this.rootListId,
             ...result.shape,
             position,
+            fileId: op.fields.fileId ?? null,
+            sublistId: op.fields.sublistId ?? null,
             createdBy: this.userId,
             version: 0,
             createdAt: now,
@@ -211,7 +232,7 @@ export class BlockStore {
       }
       const row = this.get(id);
       const fields = q.full ? (row ? fullFields(row) : null) : q.fields;
-      if (fields) ops.push({ op: "upsert", id, ...fields });
+      if (fields) ops.push(upsertOp(id, fields));
     }
     this.inflightOps = new Map(
       ops.map((o): [string, Queued] => {

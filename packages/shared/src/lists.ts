@@ -7,14 +7,37 @@ export const listTitleSchema = z.string().trim().max(200);
 /** One emoji (possibly a multi-codepoint sequence), or null for the default icon. */
 export const emojiSchema = z.string().trim().min(1).max(32).nullable();
 
+/** Built-in cover images (D-028); the web app maps each id to its file in `public/covers`. */
+export const BUILTIN_COVERS = [
+  "misty-mountains",
+  "pastel-ocean",
+  "misty-marsh",
+  "forest-river",
+  "still-rock",
+  "mountain-lake",
+  "dawn-river",
+  "wooden-dock",
+] as const;
+export const builtinCoverSchema = z.enum(BUILTIN_COVERS);
+export type BuiltinCover = z.infer<typeof builtinCoverSchema>;
+
+/** A list's cover: a built-in image, an uploaded image file, or none. */
+export const listCoverSchema = z
+  .union([z.strictObject({ builtin: builtinCoverSchema }), z.strictObject({ fileId: z.uuid() })])
+  .nullable();
+export type ListCover = z.infer<typeof listCoverSchema>;
+
 /** A list as every viewer sees it (lists-and-blocks.md → Lists). Per-user state lives elsewhere. */
 export const listSchema = z.object({
   id: z.uuid(),
   workspaceId: z.uuid(),
   rootListId: z.uuid(),
   parentListId: z.uuid().nullable(),
+  /** The sublist block that holds this list (sublists only). */
+  parentBlockId: z.uuid().nullable(),
   title: z.string(),
   emoji: z.string().nullable(),
+  cover: listCoverSchema,
   createdBy: z.uuid(),
   version: z.number().int(),
   createdAt: z.iso.datetime(),
@@ -54,11 +77,73 @@ export const createListSchema = clientMutationSchema.extend({
 export type CreateList = z.input<typeof createListSchema>;
 
 export const updateListSchema = mutationMetaSchema
-  .extend({ title: listTitleSchema.optional(), emoji: emojiSchema.optional() })
-  .refine((v) => v.title !== undefined || v.emoji !== undefined, {
+  .extend({
+    title: listTitleSchema.optional(),
+    emoji: emojiSchema.optional(),
+    /** An uploaded cover must be a ready image in the list's workspace. */
+    cover: listCoverSchema.optional(),
+  })
+  .refine((v) => v.title !== undefined || v.emoji !== undefined || v.cover !== undefined, {
     error: "Send at least one field to change",
   });
 export type UpdateList = z.infer<typeof updateListSchema>;
+
+/** `POST /lists/:id/duplicate`: the copy's id is client-made, like any new list (D-006). */
+export const duplicateListSchema = clientMutationSchema.extend({ id: z.uuid() });
+export type DuplicateList = z.infer<typeof duplicateListSchema>;
+
+/** `POST /lists/:id/duplicate` answers like a create; `sidebarEntry` is null if not starred. */
+export const duplicateListResultSchema = z.object({
+  list: z.lazy(() => listIndexItemSchema),
+  sidebarEntry: z.lazy(() => sidebarEntrySchema).nullable(),
+});
+
+// Per-user view settings (lists-and-blocks.md → Filter/sort menu).
+
+export const LIST_SORTS = [
+  "manual",
+  "creator",
+  "assignee",
+  "alphabetical",
+  "priority",
+  "created",
+  "due",
+  "source",
+  "label",
+  "completed",
+] as const;
+export const listSortSchema = z.enum(LIST_SORTS);
+export type ListSort = z.infer<typeof listSortSchema>;
+
+/** Sorts that work before tasks exist (M3 adds the task-field sorts to the menu). */
+export const AVAILABLE_LIST_SORTS = [
+  "manual",
+  "alphabetical",
+] as const satisfies readonly ListSort[];
+
+export const listViewPrefsSchema = z.object({
+  sort: listSortSchema,
+  hideCompleted: z.boolean(),
+  tasksOnly: z.boolean(),
+});
+export type ListViewPrefs = z.infer<typeof listViewPrefsSchema>;
+
+export const DEFAULT_LIST_VIEW_PREFS: ListViewPrefs = {
+  sort: "manual",
+  hideCompleted: false,
+  tasksOnly: false,
+};
+
+/** `PATCH /lists/:id/prefs`: per user, so no version; only the sent fields change. */
+export const updateListViewPrefsSchema = clientMutationSchema
+  .extend(listViewPrefsSchema.partial().shape)
+  .refine(
+    (v) => v.sort !== undefined || v.hideCompleted !== undefined || v.tasksOnly !== undefined,
+    {
+      error: "Send at least one field to change",
+    },
+  );
+export type UpdateListViewPrefs = z.infer<typeof updateListViewPrefsSchema>;
 
 // Sidebar: sections and starred entries (per user).
 
@@ -122,3 +207,4 @@ export const createListResultSchema = z.object({
   sidebarEntry: sidebarEntrySchema,
 });
 export type CreateListResult = z.infer<typeof createListResultSchema>;
+export type DuplicateListResult = z.infer<typeof duplicateListResultSchema>;

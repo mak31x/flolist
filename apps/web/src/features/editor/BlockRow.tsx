@@ -7,6 +7,8 @@ import { memo, type CSSProperties, type ReactNode } from "react";
 import { t } from "../../i18n/index.ts";
 import { BlockHandle, type BlockAction } from "./BlockHandle.tsx";
 import { InlineEditor } from "./InlineEditor.tsx";
+import { AttachmentBlock, ImageBlock } from "./MediaBlocks.tsx";
+import { SublistBlock } from "./SublistBlock.tsx";
 
 export interface BlockRowProps {
   block: Block;
@@ -15,7 +17,12 @@ export interface BlockRowProps {
   placeholder?: string | undefined;
   onChange: (block: Block, inline: InlineNode[]) => void;
   onKeyDown?: (block: Block, event: KeyboardEvent, editor: Editor) => boolean;
+  /** Keys on a block focused as a whole (divider, image, attachment, sublist). */
   onDividerKeyDown?: (block: Block, event: KeyboardEvent) => boolean;
+  /** An image's caption was edited. */
+  onCaption?: (block: Block, caption: string) => void;
+  /** Resolves once queued block changes are saved (a new sublist's list exists then). */
+  ready?: () => Promise<void>;
   onRequestLink: (editor: Editor) => void;
   onFocus?: (block: Block) => void;
   /** Part of the block selection (highlighted). */
@@ -24,6 +31,8 @@ export interface BlockRowProps {
   onHistory?: (action: "undo" | "redo") => void;
   /** False for an empty list's unsaved placeholder: no handle, no dragging. */
   saved: boolean;
+  /** False while the list is shown sorted (drag reorder is off then). */
+  draggable?: boolean;
   onAction: (block: Block, action: BlockAction) => void;
 }
 
@@ -103,18 +112,46 @@ const dividerBorder: Record<string, string> = {
  */
 export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
   const { block } = props;
-  const sortable = useSortable({ id: block.id, disabled: !props.saved });
+  const sortable = useSortable({
+    id: block.id,
+    disabled: !props.saved || props.draggable === false,
+  });
   const style: CSSProperties = {
     transform: CSS.Translate.toString(sortable.transform),
     transition: sortable.transition,
   };
 
+  const atomicKey = (e: { nativeEvent: KeyboardEvent; preventDefault: () => void }) => {
+    if (props.onDividerKeyDown?.(block, e.nativeEvent)) e.preventDefault();
+  };
+
   let body: ReactNode;
-  if (block.type === "divider") {
+  if (block.type === "image") {
+    body = (
+      <ImageBlock
+        block={block}
+        onKeyDown={atomicKey}
+        onCaption={(caption) => {
+          props.onCaption?.(block, caption);
+        }}
+      />
+    );
+  } else if (block.type === "attachment") {
+    body = <AttachmentBlock block={block} onKeyDown={atomicKey} />;
+  } else if (block.type === "sublist") {
+    body = (
+      <SublistBlock
+        block={block}
+        onKeyDown={atomicKey}
+        ready={props.ready ?? (() => Promise.resolve())}
+      />
+    );
+  } else if (block.type === "divider") {
     const color = "color" in block.content ? block.content.color : "gray";
     body = (
       <div
         role="separator"
+        data-atomic
         tabIndex={-1}
         aria-label={typeLabel(block)}
         onMouseDown={(e) => {

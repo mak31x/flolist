@@ -6,11 +6,11 @@
 - **Private by default.** The header shows a lock "Private" state until the list is shared. Sharing is covered in collaboration.md.
 - Each list belongs to exactly one **workspace** (Personal or a team; see collaboration.md). Lists created from the sidebar, Lists page or Quick create go to **Personal** by default; lists created from a team page belong to that team. Ownership can be changed later in the Share popover. New lists are auto-starred into the creator's Favorites (observed).
 - **Header actions** (top-right of the main card, as pills): **Share** · filter/sort (funnel) · **★ star** (pin to sidebar) · **⋮** menu.
-- **Filter/sort menu:** toggles **Show tasks only** (hides text, headings and media) and **Hide completed tasks**; sort options *(manual default)*: Creator · Assignee · Alphabetical · Priority · Creation date · Due date · Source · Label · Completed. A sort is a view setting (per user, per list) and does not rewrite stored positions. While sorted, drag reorder is disabled and a "Sorted by X · Reset" chip appears [assumption].
-- **⋮ menu:** Print list (print stylesheet + `window.print()`; system print dialog in Tauri) · Duplicate list · Mark all incomplete · *(separator)* · **Go to <Team> ↗** (team-owned lists only) · *(separator)* · Delete list (red, with confirm: "Delete '<title>', including all of its tasks and attachments?" Cancel / Delete). The footer shows "Created by <avatar> <name>" and the creation date.
-- **Customize** (gear on the cover/right panel): emoji (presets plus a full picker), cover image (6 built-ins plus upload ≤25 MB), and remove cover.
+- **Filter/sort menu** (until tasks exist it offers Manual and Alphabetical; Alphabetical orders blocks by their text, textless blocks last [assumption]; arrow keys still follow the stored order while sorted [assumption]):  toggles **Show tasks only** (hides text, headings and media) and **Hide completed tasks**; sort options *(manual default)*: Creator · Assignee · Alphabetical · Priority · Creation date · Due date · Source · Label · Completed. A sort is a view setting (per user, per list) and does not rewrite stored positions. While sorted, drag reorder is disabled and a "Sorted by X · Reset" chip appears [assumption].
+- **⋮ menu:** Customize [assumption: also here, so a list without a cover can get one] · Print list (print stylesheet + `window.print()`; system print dialog in Tauri) · Duplicate list · Mark all incomplete (shown from M3, when tasks exist) · *(separator)* · **Go to <Team> ↗** (team-owned lists only) · *(separator)* · Delete list (red, with confirm: "Delete '<title>', including all of its tasks and attachments?" Cancel / Delete). The footer shows "Created by <avatar> <name>" and the creation date.
+- **Customize** (gear on the cover/right panel): emoji (presets plus a full picker), cover image (6 built-ins plus upload ≤25 MB), and remove cover. Uploaded covers are scaled in the browser to a 2400px longer edge (WebP, JPEG on WebKit) [assumption]. Phones and tablets show no cover panel (D-027).
 - **Delete** sends the list, its blocks, tasks, subtasks and sublists to Trash (one trash root). Only the creator or an owner/admin can delete a list; collaborators cannot.
-- **Duplicate** makes an exact copy of the content. Tasks come back incomplete, without assignees or due dates. Sharing is not copied (the duplicate is private and placed directly under the original in the sidebar if the original was pinned) [assumption]. The title becomes "<title> (copy)".
+- **Duplicate** makes an exact copy of the content, sublists included. Tasks come back incomplete, without assignees or due dates. Sharing is not copied (the duplicate is private and placed directly under the original in the sidebar if the original was pinned) [assumption]. The title becomes "<title> (copy)". Images and attachments point at the same stored files (not copied) [assumption]. Duplicating a sublist makes a root list [assumption]. Also in the sidebar entry's context menu.
 - **Mark all incomplete** resets every task in the list, including subtasks. It's useful for reusable checklists and templates.
 
 ## Sections and favorites (per user)
@@ -25,6 +25,9 @@
 - A sublist inherits the parent's workspace and **access** (members of the parent can see it). There are no separate member lists in v1 [assumption].
 - Nesting depth is unlimited in the data, but the UI shows breadcrumbs up to 3 levels with "…".
 - Sublists can be starred into the sidebar on their own.
+- The row's title is edited in place; its arrow (or Mod+Enter) opens the page. The open-task count arrives with tasks (M3.1) [assumption]. A sublist block keeps its type (no Turn into, no block Duplicate) [assumption].
+- Deleting a sublist block (or the sublist from its own page) sends the sublist tree to Trash with it; undo restores both. A deleted sublist's page lands on its parent [assumption].
+- Copy/paste: a copied sublist pastes as its title (a paragraph); copied images/attachments keep their file [assumption].
 
 ## Block types
 | Type | Created by | Notes |
@@ -37,8 +40,8 @@
 | `numbered` | `1.` or `1)` + space | auto-numbering per contiguous run |
 | `quote` | `>` + space, slash "Blockquote" | |
 | `divider` | `---`, slash "Divider" | Superlist dividers are "colourful": pick a colour from the theme palette [assumption: 6 colours] |
-| `image` | slash "Image", paste, drag file | ≤25 MB, any image format, inline, click to view full screen; caption optional |
-| `attachment` | slash "Attachment", drag file | ≤25 MB any type; shows file icon, name, size, download |
+| `image` | slash "Image", paste, drag file | ≤25 MB, inline JPEG/PNG/WebP/GIF (other image types become attachments [assumption]), click or Space to view full screen; caption optional. Created once the upload is checked; a progress row shows meanwhile |
+| `attachment` | slash "Attachment", drag file | ≤25 MB any type; shows file icon, name, size, download. Non-images always download, never render inline (served as `application/octet-stream`, `Content-Disposition: attachment`) |
 | *(excluded)* | ~~Talk~~, ~~Make with AI~~ | not built |
 
 ## Editor behaviour (custom block editor + per-block Tiptap; see D-007)
@@ -51,7 +54,7 @@
 - **↑/↓** at the edge of a block moves to the previous or next block, keeping the caret column where possible.
 - **Mod+A** first selects the block's text, then all blocks. Shift+↑/↓ extends a block selection. Esc selects the current block [assumption] (D-048 lists the keys while blocks are selected). Mod+C / Mod+X / Mod+V copy, cut and paste blocks as Markdown + HTML + an internal JSON format. Pasting Markdown checklists (`- [ ] foo`) creates tasks.
 - **Undo/redo** (Mod+Z / Mod+Shift+Z) works across block operations within the session (a client-side command stack that issues inverse mutations).
-- **Drag and drop** blocks within a list or task body, into a sublist row, into the sidebar (move to another list), or onto Week day columns. Dropping files creates image/attachment blocks.
+- **Drag and drop** blocks within a list or task body, into a sublist row, into the sidebar (move to another list), or onto Week day columns. Dropping files creates image/attachment blocks. A block moved to another list goes to its end, within the same workspace, and the move can't be undone [assumption].
 - **Tasks in lists** show subtasks nested under them (collapsible chevron) with a progress indicator "2/5" (a small ring plus count) when they have subtasks.
 - **Typing a date** in a task title triggers the natural-language suggestion popover (see tasks.md).
 

@@ -21,6 +21,8 @@ export function blockDto(row: BlockRow): Block {
     indent: row.indent,
     // Written only after validation, so this parse is a cheap guard against hand-edited rows.
     content: blockContentSchema.parse(row.content),
+    fileId: row.fileId,
+    sublistId: row.sublistId,
     createdBy: row.createdBy,
     version: row.version,
     createdAt: row.createdAt.toISOString(),

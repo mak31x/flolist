@@ -27,7 +27,9 @@ export default defineConfig({
       url: `${API_URL}/api/health`,
       reuseExistingServer: !CI,
       timeout: 60_000,
-      env: { APP_URL: WEB_URL, LOG_LEVEL: "warn" },
+      // Every test signs up a fresh account; the default auth limit (10/min/IP) would refuse
+      // sign-ups once the suite (with retries) outgrows it.
+      env: { APP_URL: WEB_URL, LOG_LEVEL: "warn", AUTH_RATE_LIMIT_MAX: "1000" },
     },
     {
       command: "pnpm --filter @flolist/web dev",

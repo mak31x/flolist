@@ -9,10 +9,11 @@ export interface SlashItem {
 }
 
 /**
- * The slash menu, in the order lists-and-blocks.md gives. Task, Sublist, Image and Attachment
- * join it with their phases (M3.1, M2.3); nothing is listed before it works.
+ * The slash menu, in the order lists-and-blocks.md gives. Task joins it with M3.1; nothing is
+ * listed before it works.
  */
 export const SLASH_ITEMS: readonly SlashItem[] = [
+  { type: "sublist", label: "editor.type.sublist", aliases: ["list", "page", "child"] },
   { type: "paragraph", label: "editor.type.paragraph", aliases: ["text", "p"] },
   { type: "heading1", label: "editor.type.heading1", aliases: ["h1", "title"] },
   { type: "heading2", label: "editor.type.heading2", aliases: ["h2", "subtitle"] },
@@ -21,6 +22,8 @@ export const SLASH_ITEMS: readonly SlashItem[] = [
   { type: "bullet", label: "editor.type.bullet", aliases: ["ul", "unordered", "-"] },
   { type: "numbered", label: "editor.type.numbered", aliases: ["ol", "ordered", "1."] },
   { type: "quote", label: "editor.type.quote", aliases: ["quote", ">"] },
+  { type: "image", label: "editor.type.image", aliases: ["photo", "picture", "img"] },
+  { type: "attachment", label: "editor.type.attachment", aliases: ["file", "upload", "pdf"] },
 ];
 
 /** Items whose label or an alias contains the query (case-insensitive), labels first. */

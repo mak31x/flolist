@@ -224,3 +224,41 @@ describe("blocks to HTML", () => {
     );
   });
 });
+
+describe("media and sublist blocks", () => {
+  const image: BlockDraft = {
+    type: "image",
+    indent: 0,
+    content: {
+      caption: "Beach",
+      file: { name: "a.png", mime: "image/png", sizeBytes: 1, width: 1, height: 1 },
+    },
+    fileId: "0190a5d2-7c1e-7000-8000-000000000001",
+  };
+  const attachment: BlockDraft = {
+    type: "attachment",
+    indent: 0,
+    content: {
+      caption: "",
+      file: { name: "notes.pdf", mime: "application/pdf", sizeBytes: 1, width: null, height: null },
+    },
+    fileId: "0190a5d2-7c1e-7000-8000-000000000002",
+  };
+  const sublist: BlockDraft = { type: "sublist", indent: 0, content: {}, title: "Packing" };
+
+  it("writes Markdown links to the files and the sublist's title", () => {
+    expect(blocksToMarkdown([image, attachment, sublist])).toBe(
+      "![Beach](/api/v1/files/0190a5d2-7c1e-7000-8000-000000000001)\n\n" +
+        "[notes.pdf](/api/v1/files/0190a5d2-7c1e-7000-8000-000000000002)\n\n" +
+        "Packing",
+    );
+  });
+
+  it("writes HTML images, links and paragraphs", () => {
+    expect(blocksToHtml([image, attachment, sublist])).toBe(
+      '<figure><img src="/api/v1/files/0190a5d2-7c1e-7000-8000-000000000001" alt="Beach"><figcaption>Beach</figcaption></figure>' +
+        '<p><a href="/api/v1/files/0190a5d2-7c1e-7000-8000-000000000002">notes.pdf</a></p>' +
+        "<p>Packing</p>",
+    );
+  });
+});

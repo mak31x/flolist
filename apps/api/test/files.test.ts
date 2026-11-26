@@ -135,7 +135,7 @@ describe("POST /api/v1/uploads", () => {
     expect(stolen.status).toBe(409);
   });
 
-  it("rejects files over the size limit and non-image types", async () => {
+  it("rejects files over the size limit and malformed types", async () => {
     const me = await makeUser(t.db);
     const ws = await makePersonalWorkspace(t.db, me);
     const big = await app({ maxUploadBytes: 10 }).request(
@@ -145,11 +145,11 @@ describe("POST /api/v1/uploads", () => {
     expect(big.status).toBe(403);
     expect(apiErrorSchema.parse(await big.json()).error.code).toBe("LIMIT");
 
-    const svg = await app().request(
+    const bad = await app().request(
       "/api/v1/uploads",
-      as(me, post({ ...uploadBody(ws.id), mime: "image/svg+xml" })),
+      as(me, post({ ...uploadBody(ws.id), mime: "not a mime" })),
     );
-    expect(svg.status).toBe(400);
+    expect(bad.status).toBe(400);
   });
 
   it("enforces the workspace storage limit", async () => {
@@ -305,6 +305,26 @@ describe("GET /api/v1/files/:id", () => {
     expect(download.status).toBe(200);
     expect(download.headers.get("content-type")).toBe("image/png");
     expect(new Uint8Array(await download.arrayBuffer())).toEqual(PNG);
+  });
+
+  it("serves any non-image file (SVG included) as a download, never inline", async () => {
+    const me = await makeUser(t.db);
+    const ws = await makePersonalWorkspace(t.db, me);
+    const svg = new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>");
+    const { res: done, ticket } = await uploadFile(me, ws.id, svg, {
+      filename: "logo.svg",
+      mime: "image/svg+xml",
+    });
+    expect(done.status, await done.clone().text()).toBe(200);
+    const res = await app().request(`/api/v1/files/${ticket.file.id}`, as(me));
+    const download = await fetch(res.headers.get("location") ?? "");
+    expect(download.headers.get("content-type")).toBe("application/octet-stream");
+    expect(download.headers.get("content-disposition")).toMatch(/^attachment; filename="logo.svg"/);
+
+    const { ticket: png } = await uploadFile(me, ws.id);
+    const img = await app().request(`/api/v1/files/${png.file.id}`, as(me));
+    const shown = await fetch(img.headers.get("location") ?? "");
+    expect(shown.headers.get("content-disposition")).toMatch(/^inline;/);
   });
 
   it("is NOT_FOUND for outsiders, pending files and unknown ids", async () => {

@@ -19,6 +19,8 @@ const block = (n: number, over: Partial<Block> = {}): Block => ({
   type: "paragraph",
   indent: 0,
   content: text(`block ${String(n)}`),
+  fileId: null,
+  sublistId: null,
   createdBy: null,
   version: 1,
   createdAt: "2026-11-26T10:00:00.000Z",

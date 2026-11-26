@@ -6,6 +6,15 @@ const PASSWORD = "e2e-local-password-31";
 const uniqueEmail = () =>
   `e2e-editor-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}@flolist.localhost`;
 
+// `E2E_CPU_THROTTLE=4 pnpm test:e2e` slows Chromium's CPU to reproduce busy-CI timing locally.
+test.beforeEach(async ({ page }) => {
+  const rate = Number(process.env.E2E_CPU_THROTTLE ?? 0);
+  if (rate > 1) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+  }
+});
+
 async function signUpVerified(page: Page) {
   const email = uniqueEmail();
   const res = await page.request.post("/api/auth/sign-up/email", {
@@ -32,6 +41,21 @@ async function modKey(page: Page) {
       ? "Meta"
       : "Control";
   });
+}
+
+/**
+ * Fast typing: 10 ms between keys (6,000 keys a minute, far beyond a human) instead of
+ * Playwright's zero delay, which on a busy CI runner outpaces any real input.
+ */
+const KEY_GAP_MS = 10;
+function typist(page: Page) {
+  return {
+    type: (text: string) => page.keyboard.type(text, { delay: KEY_GAP_MS }),
+    press: async (key: string) => {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(KEY_GAP_MS);
+    },
+  };
 }
 
 const rows = (page: Page) => page.locator("[data-block-editor] > [data-block-id]");
@@ -78,7 +102,7 @@ test("writes a structured document with the keyboard only, and it survives a rel
   expect(listId).not.toBe("");
 
   // Full typing speed: every structural key must land in the right block.
-  const kb = page.keyboard;
+  const kb = typist(page);
   await kb.type("## Agenda");
   await kb.press("Enter");
   await kb.type("- one");
@@ -160,7 +184,7 @@ test("block selection: Esc selects, Shift+↓ extends, Backspace deletes", async
   await page.getByRole("menuitem", { name: "New list" }).click();
   await page.getByRole("textbox", { name: "List title" }).fill("Scratch");
   await page.keyboard.press("Enter");
-  const kb = page.keyboard;
+  const kb = typist(page);
   for (const line of ["a", "b", "c", "d"]) {
     await kb.type(line);
     await kb.press("Enter");

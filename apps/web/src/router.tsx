@@ -174,11 +174,13 @@ const listRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/lists/$listId",
   component: ListPage,
+  staticData: { panel: { kind: "list" } },
 });
 const taskRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/lists/$listId/tasks/$taskId",
   component: ListPage,
+  staticData: { panel: { kind: "list" } },
 });
 const teamRoute = createRoute({
   getParentRoute: () => appRoute,

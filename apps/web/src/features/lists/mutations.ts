@@ -1,5 +1,7 @@
 import {
+  DEFAULT_LIST_VIEW_PREFS,
   positionAfter,
+  type ListViewPrefs,
   uuidv7,
   type Block,
   type ListIndexItem,
@@ -18,7 +20,7 @@ import { meQuery } from "../auth/api.ts";
 import { blocksKey } from "../editor/api.ts";
 import { mutationKeys } from "../sync/apply-change.ts";
 import { t } from "../../i18n/index.ts";
-import { listKey, listsApi, listsKey, sidebarKey } from "./api.ts";
+import { listKey, listPrefsKey, listsApi, listsKey, sidebarKey } from "./api.ts";
 import {
   defaultSection,
   entriesOf,
@@ -104,8 +106,10 @@ export function useCreateList() {
         workspaceId: "",
         rootListId: v.id,
         parentListId: null,
+        parentBlockId: null,
         title: v.title ?? "",
         emoji: v.emoji ?? null,
+        cover: null,
         createdBy: me?.id ?? "",
         version: 1,
         createdAt: now,
@@ -151,22 +155,33 @@ export function useCreateList() {
 }
 
 /** Renames a list or changes its emoji (field-level PATCH). */
-export function useUpdateList(id: string) {
+export function useUpdateList(
+  id: string,
+  options: {
+    /** Resolves once the list exists on the server (a sublist is created with its block). */
+    ready?: () => Promise<void>;
+  } = {},
+) {
   const qc = useQueryClient();
-  return useOptimistic<{ title?: string; emoji?: string | null }, unknown>({
+  return useOptimistic<
+    { title?: string; emoji?: string | null; cover?: ListIndexItem["cover"] },
+    unknown
+  >({
     mutationKey: mutationKeys.list(id),
     touches: () => [listsKey, listKey(id)],
     apply: (qc, patch) => {
       qc.setQueryData<ListIndexItem[]>(listsKey, (old) => old && patchList(old, id, patch));
       qc.setQueryData<ListIndexItem | null>(listKey(id), (old) => old && { ...old, ...patch });
     },
-    run: (patch) => {
+    run: async (patch) => {
+      await options.ready?.();
       const known =
         qc.getQueryData<ListIndexItem | null>(listKey(id)) ??
         qc.getQueryData<ListIndexItem[]>(listsKey)?.find((l) => l.id === id);
       return listsApi.update(id, {
         clientMutationId: uuidv7(),
-        baseVersion: known?.version ?? 1,
+        // An optimistic sublist has version 0 until the server's copy arrives.
+        baseVersion: Math.max(1, known?.version ?? 1),
         ...patch,
       });
     },
@@ -314,3 +329,46 @@ export function markOpened(qc: QueryClient, id: string) {
   );
   listsApi.open(id).catch(() => undefined);
 }
+
+/**
+ * Duplicate list (lists-and-blocks.md → Duplicate): the server copies the content; the copy
+ * joins the index (and the sidebar, below the original, if that was starred). Resolves with
+ * the copy's id, or null after a toast when it failed.
+ */
+export function useDuplicateList() {
+  const qc = useQueryClient();
+  return async (id: string): Promise<string | null> => {
+    const copyId = uuidv7();
+    try {
+      const result = await listsApi.duplicate(id, { clientMutationId: uuidv7(), id: copyId });
+      qc.setQueryData<ListIndexItem[]>(listsKey, (old) => old && upsertList(old, result.list));
+      qc.setQueryData(listKey(copyId), result.list);
+      const entry = result.sidebarEntry;
+      if (entry) qc.setQueryData<Sidebar>(sidebarKey, (old) => old && upsertEntry(old, entry));
+      toast(t("lists.duplicated"));
+      return copyId;
+    } catch {
+      toast(t("lists.duplicateError"));
+      return null;
+    }
+  };
+}
+
+/** Changes the caller's filter/sort settings for a list (optimistic, per user). */
+export function useUpdateListPrefs(id: string) {
+  return useOptimistic<UpdatePrefsVars, unknown>({
+    mutationKey: mutationKeys.listPrefs(id),
+    touches: () => [listPrefsKey(id)],
+    apply: (qc, patch) => {
+      qc.setQueryData<ListViewPrefs>(listPrefsKey(id), (old) => ({
+        ...DEFAULT_LIST_VIEW_PREFS,
+        ...old,
+        ...patch,
+      }));
+    },
+    run: (patch) => listsApi.updatePrefs(id, { clientMutationId: uuidv7(), ...patch }),
+    error: t("lists.saveError"),
+  });
+}
+
+type UpdatePrefsVars = Partial<ListViewPrefs>;

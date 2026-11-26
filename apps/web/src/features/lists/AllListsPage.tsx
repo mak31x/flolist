@@ -65,7 +65,8 @@ export function AllListsPage() {
 
   const visible = useMemo(() => {
     // Sharing arrives in M7.2: every list is private until then.
-    const inTab = tab === "shared" ? [] : (lists ?? []);
+    const roots = (lists ?? []).filter((l) => l.parentListId === null);
+    const inTab = tab === "shared" ? [] : roots;
     const q = query.trim().toLocaleLowerCase();
     const matched = q
       ? inTab.filter((l) => (l.title || t("lists.untitled")).toLocaleLowerCase().includes(q))

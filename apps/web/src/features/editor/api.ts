@@ -3,6 +3,7 @@ import {
   blockPageSchema,
   type Block,
   type BlockBatch,
+  type MoveBlocksTo,
 } from "@flolist/shared";
 import { queryOptions } from "@tanstack/react-query";
 import { api, type ApiOptions } from "../../lib/api.ts";
@@ -26,4 +27,6 @@ export const blocksQuery = (listId: string) =>
 export const blocksApi = {
   batch: (listId: string, input: BlockBatch, options?: ApiOptions) =>
     api("POST", `/lists/${listId}/blocks/batch`, blockBatchResultSchema, input, options),
+  moveTo: (listId: string, input: MoveBlocksTo) =>
+    api("POST", `/lists/${listId}/blocks/move-to`, blockBatchResultSchema, input),
 };

@@ -41,6 +41,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ChevronDown,
+  Copy,
   ExternalLink,
   FolderPlus,
   Pencil,
@@ -61,6 +62,7 @@ import { ListIcon } from "./ListIcon.tsx";
 import {
   useCreateSection,
   useDeleteList,
+  useDuplicateList,
   useDeleteSection,
   usePutEntry,
   useUnstar,
@@ -426,6 +428,7 @@ function SidebarEntryRow({
   const updateList = useUpdateList(list.id);
   const unstar = useUnstar();
   const deleteList = useDeleteList();
+  const duplicateList = useDuplicateList();
   const renaming = useShell((s) => s.renaming);
   const setRenaming = useShell((s) => s.setRenaming);
   const isRenaming = renaming?.kind === "list" && renaming.id === list.id;
@@ -471,6 +474,17 @@ function SidebarEntryRow({
       },
     },
     {
+      icon: <Copy />,
+      label: t("lists.duplicate"),
+      run: () => {
+        void duplicateList(list.id).then((copy) => {
+          if (!copy) return;
+          onNavigate?.();
+          void navigate({ to: "/lists/$listId", params: { listId: copy } });
+        });
+      },
+    },
+    {
       icon: <StarOff />,
       label: t("lists.removeFromSidebar"),
       run: () => {
@@ -487,7 +501,10 @@ function SidebarEntryRow({
     >
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="group relative flex h-8 items-center gap-1.5 rounded-lg pl-1 hover:bg-surface-hover has-[a[data-status=active]]:bg-surface-selected">
+          <div
+            data-drop-list-id={list.id}
+            className="group relative flex h-8 items-center gap-1.5 rounded-lg pl-1 hover:bg-surface-hover has-[a[data-status=active]]:bg-surface-selected data-[drop-target]:bg-accent-soft data-[drop-target]:ring-2 data-[drop-target]:ring-accent"
+          >
             <EmojiPickerPopover
               open={pickerOpen}
               onOpenChange={setPickerOpen}

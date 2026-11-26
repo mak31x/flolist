@@ -14,15 +14,23 @@ import {
 } from "@flolist/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
-import { Copy, Link2, MoreVertical, PanelRightClose, Trash2, X } from "lucide-react";
-import { covers, type CoverId } from "./covers.ts";
+import { Copy, Link2, MoreVertical, PanelRightClose, Settings2, Trash2, X } from "lucide-react";
+import type { CoverId } from "./covers.ts";
 import { useMediaQuery } from "./use-media-query.ts";
 import { useShell } from "./ui-store.ts";
 
-export type PanelMode = { kind: "cover"; cover: CoverId } | { kind: "none" };
+/** What a route shows on the right: a fixed cover, the open list's own cover, or nothing. */
+export type PanelMode = { kind: "cover"; cover: CoverId } | { kind: "list" } | { kind: "none" };
+
+/** A resolved cover image; `onCustomize` adds the gear (list covers). */
+export interface PanelCover {
+  key: string;
+  src: string;
+  onCustomize?: () => void;
+}
 
 type RightPanelProps = {
-  mode: PanelMode;
+  cover: PanelCover | null;
   /** When set, the panel shows task details instead of the cover. */
   task: { listId: string; taskId: string } | null;
 };
@@ -30,7 +38,7 @@ type RightPanelProps = {
 const transition = { duration: seconds(duration.base), ease: easing.out };
 
 /** Right column (ui-design §1): a cover photo, or task details when a task is open. */
-export function RightPanel({ mode, task }: RightPanelProps) {
+export function RightPanel({ cover, task }: RightPanelProps) {
   const desktop = useMediaQuery("(min-width: 1024px)");
   const coverCollapsed = useShell((s) => s.coverCollapsed);
   const setCoverCollapsed = useShell((s) => s.setCoverCollapsed);
@@ -38,13 +46,13 @@ export function RightPanel({ mode, task }: RightPanelProps) {
   // Tablet and phone: details open as a sheet; there is no cover panel.
   if (!desktop) return task ? <DetailsSheet task={task} /> : null;
 
-  const showCover = mode.kind === "cover" && !coverCollapsed;
+  const showCover = cover !== null && !coverCollapsed;
   if (!task && !showCover) return null;
 
   return (
     <aside
       aria-label={task ? "Task details" : "Cover"}
-      className="relative w-[clamp(300px,30vw,440px)] shrink-0 overflow-hidden rounded-card"
+      className="relative w-[clamp(300px,30vw,440px)] shrink-0 overflow-hidden rounded-card print:hidden"
     >
       <AnimatePresence initial={false} mode="popLayout">
         {task ? (
@@ -58,22 +66,25 @@ export function RightPanel({ mode, task }: RightPanelProps) {
           >
             <TaskDetails task={task} />
           </motion.div>
-        ) : mode.kind === "cover" ? (
+        ) : cover ? (
           <motion.div
-            key={`cover-${mode.cover}`}
+            key={`cover-${cover.key}`}
             className="group absolute inset-0"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={transition}
           >
-            <img
-              src={covers[mode.cover]}
-              alt=""
-              className="size-full object-cover"
-              draggable={false}
-            />
+            <img src={cover.src} alt="" className="size-full object-cover" draggable={false} />
             <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 transition-opacity duration-(--motion-fast) group-focus-within:opacity-100 group-hover:opacity-100">
+              {cover.onCustomize && (
+                <IconButton
+                  label="Customize"
+                  icon={<Settings2 />}
+                  variant="chip"
+                  onClick={cover.onCustomize}
+                />
+              )}
               <IconButton
                 label="Hide cover"
                 icon={<PanelRightClose />}

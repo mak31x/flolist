@@ -112,6 +112,27 @@ export function socketUrl(): string {
 /** Opens a WebSocket (Tauri and Capacitor webviews provide the browser API). */
 export const openSocket = (url: string): WebSocket => new WebSocket(url);
 
+/**
+ * Saves a file the API serves (it redirects to a download with `Content-Disposition:
+ * attachment`). An anchor click works in browsers and both webviews; native shells may swap
+ * in a save dialog (M10/M11).
+ */
+export function downloadFile(url: string, filename: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+/** The system print dialog (Tauri's webview and Capacitor route `print()` to it as well). */
+export function printPage(): void {
+  window.print();
+}
+
 /** Opens a link outside the app (the system browser in native shells, a new tab on the web). */
 export function openExternal(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer");
