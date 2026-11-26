@@ -64,6 +64,17 @@ export class EditorCommands {
     });
   }
 
+  /** Saves everything queued now. */
+  flush(): Promise<void> {
+    return this.store.flush();
+  }
+
+  /** Forgets history (blocks moved to another list can't be undone here). */
+  clear(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+  }
+
   get canUndo(): boolean {
     return this.undoStack.length > 0;
   }
@@ -148,10 +159,8 @@ export class EditorCommands {
           })();
     if (!target) return;
     const block = this.store.get(target.id);
-    if (block?.type === "divider") {
-      document
-        .querySelector<HTMLElement>(`[data-block-id="${target.id}"] [role="separator"]`)
-        ?.focus();
+    if (block && block.type !== "paragraph" && !("inline" in block.content)) {
+      document.querySelector<HTMLElement>(`[data-block-id="${target.id}"] [data-atomic]`)?.focus();
       return;
     }
     focusBlock(target.id, target.target);

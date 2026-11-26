@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { blockSchema } from "./blocks.ts";
-import { listSchema, sectionSchema, sidebarEntrySchema } from "./lists.ts";
+import { listSchema, listViewPrefsSchema, sectionSchema, sidebarEntrySchema } from "./lists.ts";
 
 /**
  * Live-sync events (architecture.md → Live sync). Every mutation writes one per changed row to
@@ -46,6 +46,15 @@ export const changeEventSchema = z.union([
     entity: z.literal("block"),
     id: z.uuid(),
     data: blockSchema,
+  }),
+  z.object({
+    ...changeBase,
+    op: z.literal("upsert"),
+    /** The user's view settings for one list (`user:<id>` only); `version` = updatedAt in ms. */
+    entity: z.literal("listPrefs"),
+    /** The list id. */
+    id: z.uuid(),
+    data: listViewPrefsSchema,
   }),
   z.object({
     ...changeBase,

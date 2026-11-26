@@ -35,6 +35,9 @@ export async function uploadFile(
     mime: UploadMime;
     width?: number;
     height?: number;
+    /** Upload progress, 0–1 (the PUT then goes through XHR, which reports it). */
+    onProgress?: (fraction: number) => void;
+    signal?: AbortSignal;
   },
 ): Promise<FileDto> {
   const reserve = await fetch("/api/v1/uploads", {
@@ -54,12 +57,18 @@ export async function uploadFile(
   if (!reserve.ok) throw await failure(reserve, "Couldn't start the upload");
   const ticket = uploadTicketSchema.parse(await reserve.json());
 
-  const put = await fetch(ticket.upload.url, {
-    method: ticket.upload.method,
-    headers: ticket.upload.headers,
-    body: blob,
-  });
-  if (!put.ok) throw new UploadError("The upload didn't go through");
+  const { onProgress, signal } = opts;
+  if (onProgress) {
+    await putWithProgress(ticket.upload, blob, onProgress, signal);
+  } else {
+    const put = await fetch(ticket.upload.url, {
+      method: ticket.upload.method,
+      headers: ticket.upload.headers,
+      body: blob,
+      ...(signal ? { signal } : {}),
+    });
+    if (!put.ok) throw new UploadError("The upload didn't go through");
+  }
 
   const complete = await fetch(`/api/v1/uploads/${ticket.file.id}/complete`, {
     method: "POST",
@@ -67,4 +76,37 @@ export async function uploadFile(
   });
   if (!complete.ok) throw await failure(complete, "Couldn't finish the upload");
   return fileSchema.parse(await complete.json());
+}
+
+/** `fetch` can't report upload progress; XHR can (and Tauri/Capacitor webviews have it). */
+function putWithProgress(
+  upload: { url: string; method: string; headers: Record<string, string> },
+  blob: Blob,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(upload.method, upload.url);
+    // Same-origin relay uploads need the session cookie; presigned URLs ignore it.
+    xhr.withCredentials = upload.url.startsWith("/");
+    for (const [name, value] of Object.entries(upload.headers)) xhr.setRequestHeader(name, value);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new UploadError("The upload didn't go through"));
+    };
+    xhr.onerror = () => {
+      reject(new UploadError("The upload didn't go through"));
+    };
+    xhr.onabort = () => {
+      reject(new UploadError("The upload was cancelled", "ABORTED"));
+    };
+    signal?.addEventListener("abort", () => {
+      xhr.abort();
+    });
+    xhr.send(blob);
+  });
 }

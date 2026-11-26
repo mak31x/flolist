@@ -12,7 +12,17 @@ import {
 } from "@flolist/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Lock, MoreHorizontal, Star, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  Copy,
+  Lock,
+  MoreHorizontal,
+  Printer,
+  Settings2,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMe } from "../auth/hooks.ts";
 import { useListChannel } from "../sync/live-sync-context.ts";
@@ -20,12 +30,25 @@ import { t } from "../../i18n/index.ts";
 import { useShell } from "../../shell/ui-store.ts";
 import { BlockEditor } from "../editor/BlockEditor.tsx";
 import { focusFirstBlock } from "../editor/focus.ts";
-import { listQuery, listsKey, sidebarQuery } from "./api.ts";
+import { listPrefsQuery, listQuery, listsKey, listsQuery, sidebarQuery } from "./api.ts";
 import { DeleteListDialog } from "./DeleteListDialog.tsx";
 import { EmojiPickerPopover } from "./EmojiPicker.tsx";
 import { ListIcon } from "./ListIcon.tsx";
-import { markOpened, useDeleteList, usePutEntry, useUnstar, useUpdateList } from "./mutations.ts";
-import type { ListIndexItem } from "@flolist/shared";
+import {
+  markOpened,
+  useDeleteList,
+  useDuplicateList,
+  usePutEntry,
+  useUnstar,
+  useUpdateList,
+  useUpdateListPrefs,
+} from "./mutations.ts";
+import { CustomizeListDialog } from "./CustomizeList.tsx";
+import { printPage } from "../../platform/index.ts";
+import { workspacesQuery } from "../workspaces/api.ts";
+import { DEFAULT_LIST_VIEW_PREFS, type ListIndexItem, type ListViewPrefs } from "@flolist/shared";
+import { isSorted } from "./list-view.ts";
+import { ListViewMenu } from "./ListViewMenu.tsx";
 
 /** `/lists/:listId` (lists-and-blocks.md → Lists): header, title and the block editor. */
 export function ListPage() {
@@ -41,7 +64,8 @@ function ListPageFor({ listId }: { listId: string }) {
     ...listQuery(listId),
     ...(fromIndex ? { initialData: fromIndex } : {}),
   });
-  useListChannel(listId);
+  // Sublists share their root's channel (blocks and lists of the whole tree go there).
+  useListChannel(list?.rootListId ?? listId);
 
   const opened = useRef(false);
   useEffect(() => {
@@ -73,10 +97,13 @@ function ListPageFor({ listId }: { listId: string }) {
 
 function ListDocument({ list }: { list: ListIndexItem }) {
   const updateList = useUpdateList(list.id);
+  const updatePrefs = useUpdateListPrefs(list.id);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const prefs = useQuery(listPrefsQuery(list.id)).data ?? DEFAULT_LIST_VIEW_PREFS;
 
   return (
     <div className="w-full max-w-[820px] px-5 pt-5 pb-28 md:px-12 md:pt-10 md:pb-16">
+      {list.parentListId && <Breadcrumb list={list} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <EmojiPickerPopover
           open={pickerOpen}
@@ -94,13 +121,27 @@ function ListDocument({ list }: { list: ListIndexItem }) {
             <ListIcon emoji={list.emoji} size="lg" />
           </button>
         </EmojiPickerPopover>
-        <ListHeaderActions list={list} />
+        <ListHeaderActions list={list} prefs={prefs} />
       </div>
       <ListTitle list={list} />
+      {isSorted(prefs) && (
+        <div className="mt-3 print:hidden">
+          <Pill
+            aria-label={`${t("lists.view.sortedBy", { sort: t(`lists.sort.${prefs.sort}`) })}, ${t("lists.view.reset")}`}
+            onClick={() => {
+              updatePrefs.mutate({ sort: "manual" });
+            }}
+          >
+            {t("lists.view.sortedBy", { sort: t(`lists.sort.${prefs.sort}`) })} ·{" "}
+            <span className="font-semibold text-accent">{t("lists.view.reset")}</span>
+          </Pill>
+        </div>
+      )}
       <div className="mt-6">
         <BlockEditor
           listId={list.id}
           rootListId={list.rootListId}
+          view={prefs}
           onExitTop={() => {
             document.querySelector<HTMLTextAreaElement>("[data-list-title]")?.focus();
           }}
@@ -207,13 +248,18 @@ function ListTitle({ list }: { list: ListIndexItem }) {
 const atEnd = (el: HTMLTextAreaElement) =>
   el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
 
-function ListHeaderActions({ list }: { list: ListIndexItem }) {
+function ListHeaderActions({ list, prefs }: { list: ListIndexItem; prefs: ListViewPrefs }) {
   const me = useMe();
   const navigate = useNavigate();
   const { data: sidebar } = useQuery(sidebarQuery);
   const putEntry = usePutEntry();
   const unstar = useUnstar();
   const deleteList = useDeleteList();
+  const duplicateList = useDuplicateList();
+  const { data: workspaces } = useQuery(workspacesQuery);
+  const team = workspaces?.find((w) => w.id === list.workspaceId && w.kind === "team");
+  const customizing = useShell((s) => s.customizing);
+  const setCustomizing = useShell((s) => s.setCustomizing);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const starred = sidebar?.entries.some((e) => e.listId === list.id) ?? false;
   const created = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
@@ -221,13 +267,14 @@ function ListHeaderActions({ list }: { list: ListIndexItem }) {
   );
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 print:hidden">
       <Tooltip content={t("lists.privateHint")}>
         <span className="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-text-muted [&_svg]:size-3.5">
           <Lock aria-hidden />
           {t("lists.private")}
         </span>
       </Tooltip>
+      <ListViewMenu listId={list.id} prefs={prefs} />
       <Pill
         aria-pressed={starred}
         aria-label={starred ? t("lists.unstar") : t("lists.star")}
@@ -245,6 +292,47 @@ function ListHeaderActions({ list }: { list: ListIndexItem }) {
         </MenuTrigger>
         <MenuContent align="end">
           <MenuItem
+            icon={<Settings2 />}
+            onSelect={() => {
+              setCustomizing(list.id);
+            }}
+          >
+            {t("lists.customize")}
+          </MenuItem>
+          <MenuItem
+            icon={<Printer />}
+            onSelect={() => {
+              // After the menu has closed, so it isn't in the printout.
+              setTimeout(printPage, 0);
+            }}
+          >
+            {t("lists.print")}
+          </MenuItem>
+          <MenuItem
+            icon={<Copy />}
+            onSelect={() => {
+              void duplicateList(list.id).then((copy) => {
+                if (copy) void navigate({ to: "/lists/$listId", params: { listId: copy } });
+              });
+            }}
+          >
+            {t("lists.duplicate")}
+          </MenuItem>
+          {team && (
+            <>
+              <MenuSeparator />
+              <MenuItem
+                icon={<ArrowUpRight />}
+                onSelect={() => {
+                  void navigate({ to: "/team/$teamId", params: { teamId: team.id } });
+                }}
+              >
+                {t("lists.goToTeam", { name: team.name })}
+              </MenuItem>
+            </>
+          )}
+          <MenuSeparator />
+          <MenuItem
             icon={<Trash2 />}
             destructive
             onSelect={() => {
@@ -260,15 +348,75 @@ function ListHeaderActions({ list }: { list: ListIndexItem }) {
           </div>
         </MenuContent>
       </Menu>
+      <CustomizeListDialog
+        list={list}
+        open={customizing === list.id}
+        onOpenChange={(open) => {
+          setCustomizing(open ? list.id : null);
+        }}
+      />
       <DeleteListDialog
         title={list.title}
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onConfirm={() => {
           deleteList.mutate(list.id);
-          void navigate({ to: "/all-lists" });
+          // A deleted sublist lands on its parent, a root list on All lists [assumption].
+          if (list.parentListId)
+            void navigate({ to: "/lists/$listId", params: { listId: list.parentListId } });
+          else void navigate({ to: "/all-lists" });
         }}
       />
     </div>
+  );
+}
+
+/** How many levels the breadcrumb shows before it folds the middle into "…". */
+const CRUMB_LEVELS = 3;
+
+/**
+ * `Parent › Sublist` above a sublist's header (lists-and-blocks.md → Sublists). Up to three
+ * levels; deeper chains keep the root and the last two, with "…" between.
+ */
+function Breadcrumb({ list }: { list: ListIndexItem }) {
+  const { data: index } = useQuery(listsQuery);
+  const chain: ListIndexItem[] = [list];
+  const byId = new Map((index ?? []).map((l) => [l.id, l]));
+  for (let parent = list.parentListId; parent;) {
+    const found = byId.get(parent);
+    if (!found || chain.includes(found)) break;
+    chain.unshift(found);
+    parent = found.parentListId;
+  }
+  const items: (ListIndexItem | "gap")[] =
+    chain.length > CRUMB_LEVELS
+      ? [chain[0] as ListIndexItem, "gap", ...chain.slice(-(CRUMB_LEVELS - 1))]
+      : chain;
+  return (
+    <nav aria-label={t("lists.breadcrumb")} className="mb-2">
+      <ol className="flex min-w-0 flex-wrap items-center gap-1 text-[13px] text-text-muted">
+        {items.map((item, i) => (
+          <li key={item === "gap" ? "gap" : item.id} className="flex min-w-0 items-center gap-1">
+            {i > 0 && <ChevronRight aria-hidden className="size-3.5 shrink-0 text-text-subtle" />}
+            {item === "gap" ? (
+              <span aria-hidden>…</span>
+            ) : item.id === list.id ? (
+              <span aria-current="page" className="truncate font-medium text-text">
+                {item.title || t("lists.untitled")}
+              </span>
+            ) : (
+              <Link
+                to="/lists/$listId"
+                params={{ listId: item.id }}
+                className="flex min-w-0 items-center gap-1 rounded px-1 hover:bg-surface-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none"
+              >
+                <ListIcon emoji={item.emoji} />
+                <span className="truncate">{item.title || t("lists.untitled")}</span>
+              </Link>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }

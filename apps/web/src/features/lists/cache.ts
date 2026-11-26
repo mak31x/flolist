@@ -23,8 +23,7 @@ export function upsertList(items: readonly ListIndexItem[], list: List | ListInd
     "lastOpenedAt" in list ? list.lastOpenedAt : (existing?.lastOpenedAt ?? null);
   const next: ListIndexItem = { ...list, lastOpenedAt };
   const rest = items.filter((l) => l.id !== list.id);
-  // Sublists (M2.3) never show in the index.
-  if (list.parentListId !== null) return rest;
+  // Sublists are in the index too (breadcrumbs, starring); All lists shows roots only.
   return [...rest, next].sort(newestFirst);
 }
 
@@ -34,7 +33,7 @@ export const removeList = (items: readonly ListIndexItem[], id: string) =>
 export const patchList = (
   items: readonly ListIndexItem[],
   id: string,
-  patch: Partial<Pick<List, "title" | "emoji">>,
+  patch: Partial<Pick<List, "title" | "emoji" | "cover">>,
 ) => items.map((l) => (l.id === id ? { ...l, ...patch } : l));
 
 const entryOrder = (a: SidebarEntry, b: SidebarEntry) =>

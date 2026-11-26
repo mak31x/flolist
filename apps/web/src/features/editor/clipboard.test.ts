@@ -69,6 +69,32 @@ describe("writeBlocks / readBlocks", () => {
   });
 });
 
+describe("media and sublists on the clipboard", () => {
+  const fileId = "0190a5d2-7c1e-7000-8000-000000000001";
+  const image: BlockDraft = {
+    type: "image",
+    indent: 0,
+    content: {
+      caption: "",
+      file: { name: "a.png", mime: "image/png", sizeBytes: 1, width: 1, height: 1 },
+    },
+    fileId,
+  };
+
+  it("keeps an image's file and turns a sublist into its title", () => {
+    const data = transfer();
+    writeBlocks(data, [image, { type: "sublist", indent: 0, content: {}, title: "Packing" }]);
+    expect(readBlocks(data)).toEqual([image, p("Packing")]);
+  });
+
+  it("refuses media drafts without a file", () => {
+    const data = transfer();
+    data.setData(BLOCKS_MIME, JSON.stringify([{ ...image, fileId: undefined }]));
+    data.setData("text/plain", "fallback");
+    expect(readBlocks(data)).toEqual([p("fallback")]);
+  });
+});
+
 describe("htmlToBlocks", () => {
   it("maps headings, lists with nesting, quotes, rules and code", () => {
     const html = `

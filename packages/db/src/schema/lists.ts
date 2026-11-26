@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { createdAt, id, updatedAt, version } from "./columns.ts";
+import { blocks } from "./blocks.ts";
 import { files } from "./files.ts";
 import { workspaces } from "./workspaces.ts";
 
@@ -37,8 +38,10 @@ export const lists = pgTable(
     parentListId: uuid("parent_list_id").references((): AnyPgColumn => lists.id, {
       onDelete: "cascade",
     }),
-    /** The `sublist` block that holds this list; its FK arrives with blocks (M2.2/M2.3). */
-    parentBlockId: uuid("parent_block_id"),
+    /** The `sublist` block that holds this list (sublists only). */
+    parentBlockId: uuid("parent_block_id").references((): AnyPgColumn => blocks.id, {
+      onDelete: "set null",
+    }),
     title: text("title").notNull().default(""),
     emoji: text("emoji"),
     coverFileId: uuid("cover_file_id").references(() => files.id, { onDelete: "set null" }),

@@ -8,6 +8,7 @@ import {
   type BlockType,
   type InlineNode,
   type Mark,
+  type MediaContent,
 } from "./blocks.ts";
 
 /**
@@ -21,7 +22,17 @@ export interface BlockDraft {
   type: BlockType;
   indent: number;
   content: BlockContent;
+  /** Image/attachment blocks: their file (pasting within the workspace keeps it). */
+  fileId?: string | undefined;
+  /** Sublist blocks: the child list's title (a paste turns it into text). */
+  title?: string | undefined;
 }
+
+/** Same-origin URL of a file (mirrors `fileUrl` in files.ts, kept local to avoid a cycle). */
+const filePath = (id: string) => `/api/v1/files/${id}`;
+
+const mediaOf = (block: BlockDraft) =>
+  "caption" in block.content ? (block.content as MediaContent) : null;
 
 // Writing Markdown.
 
@@ -154,6 +165,20 @@ export function blocksToMarkdown(blocks: readonly BlockDraft[]): string {
       out += "---";
       return;
     }
+    const media = mediaOf(block);
+    if (media) {
+      const name = media.file?.name ?? block.type;
+      const url = block.fileId ? filePath(block.fileId) : "";
+      out +=
+        block.type === "image"
+          ? `![${escapeText(media.caption || name)}](${url})`
+          : `[${escapeText(name)}](${url})`;
+      return;
+    }
+    if (block.type === "sublist") {
+      out += escapeLineStart(escapeText(block.title ?? ""));
+      return;
+    }
     const inline = "inline" in block.content ? block.content.inline : [];
     const text = inlineToMarkdown(inline);
     const lines = text.split("\n").map(escapeLineStart);
@@ -228,7 +253,15 @@ export function blocksToHtml(blocks: readonly BlockDraft[]): string {
     const inline = "inline" in block.content ? inlineToHtml(block.content.inline) : "";
     if (!isIndentable(block.type)) {
       closeLists(0);
+      const media = mediaOf(block);
+      const url = block.fileId ? escapeHtml(filePath(block.fileId)) : "";
       if (block.type === "divider") out += "<hr>";
+      else if (media && block.type === "image") {
+        const alt = escapeHtml(media.caption || (media.file?.name ?? ""));
+        out += `<figure><img src="${url}" alt="${alt}">${media.caption ? `<figcaption>${escapeHtml(media.caption)}</figcaption>` : ""}</figure>`;
+      } else if (media) {
+        out += `<p><a href="${url}">${escapeHtml(media.file?.name ?? "")}</a></p>`;
+      } else if (block.type === "sublist") out += `<p>${escapeHtml(block.title ?? "")}</p>`;
       else if (block.type === "quote") out += `<blockquote><p>${inline}</p></blockquote>`;
       else if (block.type === "paragraph") out += `<p>${inline}</p>`;
       else out += `<h${block.type.slice(-1)}>${inline}</h${block.type.slice(-1)}>`;

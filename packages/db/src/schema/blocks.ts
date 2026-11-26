@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   check,
   customType,
   index,
@@ -12,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { createdAt, id, updatedAt, version } from "./columns.ts";
+import { files } from "./files.ts";
 import { lists } from "./lists.ts";
 
 /** Block types built so far; the API checks these equal `BLOCK_TYPES` in packages/shared. */
@@ -24,6 +26,9 @@ export const blockTypes = [
   "numbered",
   "quote",
   "divider",
+  "image",
+  "attachment",
+  "sublist",
 ] as const;
 export type BlockTypeColumn = (typeof blockTypes)[number];
 export const blockContainerTypes = ["list", "task"] as const;
@@ -40,8 +45,9 @@ const positionText = customType<{ data: string }>({
 
 /**
  * One block of a list or task body (D-007, data-model.md → Blocks). `root_list_id` is the root
- * list whose access and `list:<rootId>` channel apply. Task, sublist and file references are
- * added with those block types (M2.3/M3.1). Soft-deleted rows keep `trash_root_id`.
+ * list whose access and `list:<rootId>` channel apply. Image/attachment blocks point at a file,
+ * sublist blocks at their child list (one block per list); the task reference arrives in M3.1.
+ * Soft-deleted rows keep `trash_root_id`.
  */
 export const blocks = pgTable(
   "blocks",
@@ -56,6 +62,10 @@ export const blocks = pgTable(
     type: text("type", { enum: blockTypes }).notNull(),
     indent: smallint("indent").notNull().default(0),
     content: jsonb("content").$type<Record<string, unknown>>().notNull(),
+    fileId: uuid("file_id").references(() => files.id, { onDelete: "set null" }),
+    sublistId: uuid("sublist_id")
+      .unique()
+      .references((): AnyPgColumn => lists.id, { onDelete: "cascade" }),
     createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
     version: version(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -76,5 +86,10 @@ export const blocks = pgTable(
       .where(sql`${t.deletedAt} is null`),
     index("blocks_root_list_id_idx").on(t.rootListId),
     index("blocks_trash_root_id_idx").on(t.trashRootId),
+    index("blocks_file_id_idx").on(t.fileId),
+    check(
+      "blocks_reference_check",
+      sql`(${t.fileId} is null or ${t.type} in ('image', 'attachment')) and ((${t.sublistId} is not null) = (${t.type} = 'sublist'))`,
+    ),
   ],
 );

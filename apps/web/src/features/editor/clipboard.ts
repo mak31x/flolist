@@ -3,6 +3,9 @@ import {
   blockContentSchema,
   blockTypeSchema,
   blocksToHtml,
+  contentMatchesType,
+  isMediaBlockType,
+  textInline,
   blocksToMarkdown,
   markdownToBlocks,
   normalizeInline,
@@ -24,12 +27,29 @@ export const BLOCKS_MIME = "application/x-flolist-blocks";
 const HTML_ATTR = "data-flolist-blocks";
 
 const draftsSchema = z.array(
-  z.object({
-    type: blockTypeSchema,
-    indent: z.number().int().min(0).max(MAX_INDENT),
-    content: blockContentSchema,
-  }),
+  z
+    .object({
+      type: blockTypeSchema,
+      indent: z.number().int().min(0).max(MAX_INDENT),
+      content: blockContentSchema,
+      fileId: z.uuid().optional(),
+      title: z.string().max(500).optional(),
+    })
+    .refine((d) => contentMatchesType(d.type, d.content))
+    .refine((d) => !isMediaBlockType(d.type) || d.fileId !== undefined),
 );
+
+/**
+ * What a paste can recreate: media blocks keep their file (the server checks it belongs to
+ * this workspace); a sublist can't be cloned by a paste, so it comes back as its title.
+ */
+function pastable(drafts: BlockDraft[]): BlockDraft[] {
+  return drafts.map((d) =>
+    d.type === "sublist"
+      ? { type: "paragraph", indent: 0, content: { inline: textInline(d.title ?? "") } }
+      : d,
+  );
+}
 
 export function writeBlocks(data: DataTransfer, drafts: readonly BlockDraft[]): void {
   const json = JSON.stringify(drafts);
@@ -48,7 +68,7 @@ export function writeBlocks(data: DataTransfer, drafts: readonly BlockDraft[]): 
 function parseJson(raw: string): BlockDraft[] | null {
   try {
     const parsed = draftsSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
+    return parsed.success ? pastable(parsed.data) : null;
   } catch {
     return null;
   }

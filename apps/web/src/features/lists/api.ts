@@ -1,5 +1,10 @@
 import {
   createListResultSchema,
+  DEFAULT_LIST_VIEW_PREFS,
+  duplicateListResultSchema,
+  listViewPrefsSchema,
+  type ListViewPrefs,
+  type UpdateListViewPrefs,
   listIndexItemSchema,
   listIndexSchema,
   sectionSchema,
@@ -19,6 +24,16 @@ import { api, ApiRequestError } from "../../lib/api.ts";
 export const listsKey = ["lists"] as const;
 export const sidebarKey = ["sidebar"] as const;
 export const listKey = (id: string) => ["list", id] as const;
+export const listPrefsKey = (id: string) => ["listPrefs", id] as const;
+
+/** The caller's filter/sort settings for one list. */
+export const listPrefsQuery = (id: string) =>
+  queryOptions({
+    queryKey: listPrefsKey(id),
+    queryFn: (): Promise<ListViewPrefs> => api("GET", `/lists/${id}/prefs`, listViewPrefsSchema),
+    placeholderData: DEFAULT_LIST_VIEW_PREFS,
+    staleTime: 5 * 60_000,
+  });
 
 /** The caller's list index, newest first (All lists, sidebar titles). */
 export const listsQuery = queryOptions({
@@ -61,6 +76,10 @@ export const listsApi = {
   remove: (id: string, clientMutationId: string) =>
     api("DELETE", `/lists/${id}`, ok, { clientMutationId }),
   open: (id: string) => api("POST", `/lists/${id}/open`),
+  duplicate: (id: string, input: { clientMutationId: string; id: string }) =>
+    api("POST", `/lists/${id}/duplicate`, duplicateListResultSchema, input),
+  updatePrefs: (id: string, input: UpdateListViewPrefs) =>
+    api("PATCH", `/lists/${id}/prefs`, listViewPrefsSchema, input),
   putEntry: (listId: string, input: PutSidebarEntry) =>
     api("PUT", `/sidebar/entries/${listId}`, sidebarEntrySchema, input),
   removeEntry: (listId: string, clientMutationId: string) =>

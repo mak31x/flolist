@@ -1,4 +1,10 @@
-import { DIVIDER_COLORS, type Block, type BlockType, type DividerColor } from "@flolist/shared";
+import {
+  DIVIDER_COLORS,
+  isReferenceBlockType,
+  type Block,
+  type BlockType,
+  type DividerColor,
+} from "@flolist/shared";
 import {
   Menu,
   MenuContent,
@@ -58,10 +64,13 @@ export function BlockHandle({
     }, 0);
   };
   const current = "color" in block.content ? block.content.color : null;
+  // Media and sublists keep their type; text and dividers turn into each other only.
+  const reference = isReferenceBlockType(block.type);
+  const turnIntoItems = reference ? [] : SLASH_ITEMS.filter((i) => !isReferenceBlockType(i.type));
   return (
     <div
       className={cn(
-        "absolute top-0 -left-[54px] hidden h-full items-start gap-0.5 pt-[3px] md:flex",
+        "absolute top-0 -left-[54px] hidden h-full items-start gap-0.5 pt-[3px] md:flex print:hidden",
         "opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100 focus-within:opacity-100",
       )}
     >
@@ -93,8 +102,8 @@ export function BlockHandle({
             e.preventDefault();
           }}
         >
-          <MenuLabel>{t("editor.slash.label")}</MenuLabel>
-          {SLASH_ITEMS.map((item) => {
+          {!reference && <MenuLabel>{t("editor.slash.label")}</MenuLabel>}
+          {turnIntoItems.map((item) => {
             const ItemIcon = BLOCK_ICONS[item.type] ?? Pilcrow;
             return (
               <MenuItem
@@ -131,15 +140,17 @@ export function BlockHandle({
               ))}
             </>
           )}
-          <MenuSeparator />
-          <MenuItem
-            icon={<Copy />}
-            onSelect={() => {
-              act({ kind: "duplicate" });
-            }}
-          >
-            {t("editor.handle.duplicate")}
-          </MenuItem>
+          {!reference && <MenuSeparator />}
+          {block.type !== "sublist" && (
+            <MenuItem
+              icon={<Copy />}
+              onSelect={() => {
+                act({ kind: "duplicate" });
+              }}
+            >
+              {t("editor.handle.duplicate")}
+            </MenuItem>
+          )}
           <MenuItem
             icon={<Trash2 />}
             destructive

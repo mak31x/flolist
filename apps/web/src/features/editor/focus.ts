@@ -103,8 +103,10 @@ export function focusFirstBlock(): boolean {
   const first = document.querySelector<HTMLElement>("[data-block-editor] [data-block-id]");
   const id = first?.dataset.blockId;
   if (!first || !id) return false;
-  if (first.dataset.blockType === "divider")
-    first.querySelector<HTMLElement>('[role="separator"]')?.focus();
+  const atomic = first.querySelector<HTMLElement>("[data-atomic]");
+  if (atomic) atomic.focus();
+  else if (first.dataset.blockType === "divider")
+    first.querySelector<HTMLElement>("[data-atomic]")?.focus();
   else focusBlock(id, "start");
   return true;
 }

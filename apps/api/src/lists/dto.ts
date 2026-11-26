@@ -1,15 +1,28 @@
-import type { Executor } from "@flolist/db";
+import type { Executor, listSorts } from "@flolist/db";
 import { sections, sidebarEntries } from "@flolist/db";
 import {
+  builtinCoverSchema,
   channel,
   DEFAULT_SECTION_TITLE,
   positionAfter,
   type List,
+  type ListCover,
+  type ListSort,
   type Section,
   type SidebarEntry,
 } from "@flolist/shared";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { ListRow, SectionRow } from "../authz/authorize.ts";
+
+// The DB's sort enum is its own copy of LIST_SORTS; a drift fails typecheck.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+export const listSortsMatch: Same<(typeof listSorts)[number], ListSort> = true;
+
+function coverOf(row: ListRow): ListCover {
+  if (row.coverFileId) return { fileId: row.coverFileId };
+  const builtin = builtinCoverSchema.safeParse(row.coverBuiltin);
+  return builtin.success ? { builtin: builtin.data } : null;
+}
 
 export function listDto(row: ListRow): List {
   return {
@@ -17,8 +30,10 @@ export function listDto(row: ListRow): List {
     workspaceId: row.workspaceId,
     rootListId: row.rootListId,
     parentListId: row.parentListId,
+    parentBlockId: row.parentBlockId,
     title: row.title,
     emoji: row.emoji,
+    cover: coverOf(row),
     createdBy: row.createdBy,
     version: row.version,
     createdAt: row.createdAt.toISOString(),

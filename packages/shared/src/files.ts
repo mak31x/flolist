@@ -2,11 +2,28 @@ import { z } from "zod";
 
 /**
  * Upload rules shared by the API and the web app (D-012, D-013, D-037).
- * M1.2 accepts images only (avatars); attachment phases widen `uploadMimes`.
+ * Images in `imageMimes` are checked by their magic bytes and shown inline; any other type is
+ * accepted as an attachment (M2.3) and always downloads (`Content-Disposition: attachment`).
  */
 export const imageMimes = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
-export const uploadMimes = [...imageMimes] as const;
-export const uploadMimeSchema = z.enum(uploadMimes);
+export type ImageMime = (typeof imageMimes)[number];
+
+export function isInlineImage(mime: string): mime is ImageMime {
+  return (imageMimes as readonly string[]).includes(mime);
+}
+
+/** Fallback for files the browser can't type. */
+export const GENERIC_MIME = "application/octet-stream";
+
+/** A `type/subtype` MIME (parameters dropped by the client). */
+export const uploadMimeSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(255)
+  .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/, {
+    error: "Not a valid MIME type",
+  });
 export type UploadMime = z.infer<typeof uploadMimeSchema>;
 
 export const DEFAULT_MAX_UPLOAD_MB = 25;

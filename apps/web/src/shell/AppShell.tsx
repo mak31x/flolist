@@ -4,9 +4,12 @@ import { Link, Navigate, Outlet, useLocation, useMatches, useParams } from "@tan
 import { Bell, Menu as MenuIcon, PanelLeft, PanelRightOpen, Plus, Search } from "lucide-react";
 import { meQuery } from "../features/auth/api.ts";
 import { useServerThemeSync } from "../features/auth/hooks.ts";
+import { listQuery } from "../features/lists/api.ts";
+import { coverSrc } from "../features/lists/cover.ts";
 import { QuickCreate } from "../features/lists/QuickCreate.tsx";
+import { covers } from "./covers.ts";
 import { LiveSyncProvider } from "../features/sync/LiveSync.tsx";
-import { RightPanel, type PanelMode } from "./RightPanel.tsx";
+import { RightPanel, type PanelCover, type PanelMode } from "./RightPanel.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { useShell } from "./ui-store.ts";
 
@@ -47,24 +50,40 @@ function Shell() {
   const toggleSidebar = useShell((s) => s.toggleSidebar);
   const coverCollapsed = useShell((s) => s.coverCollapsed);
   const setCoverCollapsed = useShell((s) => s.setCoverCollapsed);
+  const setCustomizing = useShell((s) => s.setCustomizing);
+  const listId = mode.kind === "list" ? params.listId : undefined;
+  const { data: list } = useQuery({ ...listQuery(listId ?? ""), enabled: listId !== undefined });
+  const listCover = listId && list ? coverSrc(list.cover) : null;
+  const cover: PanelCover | null =
+    mode.kind === "cover"
+      ? { key: mode.cover, src: covers[mode.cover] }
+      : list && listCover
+        ? {
+            key: listCover,
+            src: listCover,
+            onCustomize: () => {
+              setCustomizing(list.id);
+            },
+          }
+        : null;
   const drawerOpen = useShell((s) => s.drawerOpen);
   const setDrawerOpen = useShell((s) => s.setDrawerOpen);
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-canvas">
+    <div className="flex h-dvh overflow-hidden bg-canvas print:block print:h-auto print:overflow-visible print:bg-surface">
       {!sidebarCollapsed && (
-        <aside className="hidden w-[260px] shrink-0 bg-surface md:block">
+        <aside className="hidden w-[260px] shrink-0 bg-surface md:block print:hidden">
           <Sidebar />
         </aside>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col md:flex-row md:gap-2 md:p-2">
+      <div className="flex min-w-0 flex-1 flex-col md:flex-row md:gap-2 md:p-2 print:block print:p-0">
         <MobileHeader
           onOpenDrawer={() => {
             setDrawerOpen(true);
           }}
         />
-        <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface md:rounded-card">
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface md:rounded-card print:overflow-visible">
           {sidebarCollapsed && (
             <IconButton
               label="Show sidebar"
@@ -74,7 +93,7 @@ function Shell() {
               className="absolute top-3 left-3 z-10 max-md:hidden"
             />
           )}
-          {mode.kind === "cover" && coverCollapsed && !task && (
+          {cover && coverCollapsed && !task && (
             <IconButton
               label="Show cover"
               icon={<PanelRightOpen />}
@@ -86,7 +105,7 @@ function Shell() {
           )}
           <Outlet />
         </main>
-        <RightPanel mode={mode} task={task} />
+        <RightPanel cover={cover} task={task} />
       </div>
 
       <MobileBar />
@@ -107,7 +126,7 @@ function Shell() {
 
 function MobileHeader({ onOpenDrawer }: { onOpenDrawer: () => void }) {
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between bg-surface px-2 pt-[env(safe-area-inset-top)] md:hidden">
+    <header className="flex h-12 shrink-0 items-center justify-between bg-surface px-2 pt-[env(safe-area-inset-top)] md:hidden print:hidden">
       <IconButton
         label="Open navigation"
         icon={<MenuIcon />}
@@ -124,7 +143,7 @@ function MobileHeader({ onOpenDrawer }: { onOpenDrawer: () => void }) {
 function MobileBar() {
   const setDrawerOpen = useShell((s) => s.setDrawerOpen);
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex items-end justify-center px-4 pb-[calc(16px+env(safe-area-inset-bottom))] md:hidden">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex items-end justify-center px-4 pb-[calc(16px+env(safe-area-inset-bottom))] md:hidden print:hidden">
       <QuickCreate
         align="center"
         revealSidebar={() => {

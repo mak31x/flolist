@@ -8,6 +8,7 @@ import {
   inlineText,
   normalizeInline,
   numberedLabels,
+  resolveBlockShape,
   type BlockType,
 } from "./blocks.ts";
 import { changeEventSchema } from "./sync.ts";
@@ -174,6 +175,8 @@ describe("block change events", () => {
       type: "heading1",
       indent: 0,
       content: { inline: [{ type: "text", text: "Title" }] },
+      fileId: null,
+      sublistId: null,
       createdBy: id(3),
       version: 1,
       createdAt: "2026-11-26T10:00:00.000Z",
@@ -198,5 +201,29 @@ describe("block change events", () => {
       clientMutationId: id(4),
     };
     expect(changeEventSchema.parse(del)).toEqual(del);
+  });
+});
+
+describe("media and sublist block shapes", () => {
+  it("gives each new type its empty content and keeps reference types fixed", () => {
+    expect(emptyContent("image")).toEqual({ file: null, caption: "" });
+    expect(emptyContent("sublist")).toEqual({});
+    const image = { type: "image" as const, indent: 0, content: emptyContent("image") };
+    expect(resolveBlockShape(image, { type: "paragraph" }).ok).toBe(false);
+    const para = { type: "paragraph" as const, indent: 0, content: emptyContent("paragraph") };
+    expect(resolveBlockShape(para, { type: "attachment" }).ok).toBe(false);
+    expect(resolveBlockShape(null, { type: "sublist" })).toEqual({
+      ok: true,
+      shape: { type: "sublist", indent: 0, content: {} },
+    });
+  });
+
+  it("only accepts content that fits the type", () => {
+    expect(blockContentSchema.safeParse({ caption: "x", file: null }).success).toBe(true);
+    expect(contentMatchesType("image", { inline: [] })).toBe(false);
+    expect(contentMatchesType("sublist", { inline: [] })).toBe(false);
+    expect(contentMatchesType("sublist", {})).toBe(true);
+    // Extra keys are refused, so an empty sublist content can't swallow other shapes.
+    expect(blockContentSchema.safeParse({ caption: "x", file: null, evil: 1 }).success).toBe(false);
   });
 });

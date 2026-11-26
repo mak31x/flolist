@@ -1,10 +1,13 @@
 import {
+  FileImage,
   Heading1,
   Heading2,
   Heading3,
   List,
   ListOrdered,
+  ListTree,
   Minus,
+  Paperclip,
   Pilcrow,
   Quote,
   type LucideIcon,
@@ -20,4 +23,7 @@ export const BLOCK_ICONS: Record<string, LucideIcon> = {
   bullet: List,
   numbered: ListOrdered,
   quote: Quote,
+  image: FileImage,
+  attachment: Paperclip,
+  sublist: ListTree,
 };

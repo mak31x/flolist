@@ -2,6 +2,8 @@ import {
   MAX_INDENT,
   inlineLength,
   isIndentable,
+  isReferenceBlockType,
+  isTextBlockType,
   normalizeInline,
   positionBetween,
   positionsBetween,
@@ -11,16 +13,23 @@ import {
   type InlineNode,
   uuidv7,
 } from "@flolist/shared";
+import type { QueryClient } from "@tanstack/react-query";
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { BlockAction } from "./BlockHandle.tsx";
 import type { EditorCommands } from "./commands.ts";
 import { docToInline, inlineToDoc } from "./content.ts";
 import { caretOnEdgeLine, caretX, editorFor, focusBlock } from "./focus.ts";
 import { historyKey, isMod } from "./keys.ts";
+import { focusAtomic, insertReference } from "./media.ts";
 import { markdownShortcut } from "./slash.ts";
 import type { BlockFields, LocalOp } from "./store.ts";
 
 export interface KeyContext {
+  listId: string;
+  rootListId: string;
+  /** Where uploads go (the list's workspace; a just-created list may still be saving). */
+  workspaceId: () => Promise<string>;
+  qc: QueryClient;
   /** The blocks in order, as of now (including the unsaved placeholder of an empty list). */
   rows: () => readonly Block[];
   /** Whether the server/store knows this block yet (the placeholder doesn't). */
@@ -92,16 +101,17 @@ const atStart = (editor: Editor) =>
 const atEnd = (editor: Editor) =>
   editor.state.selection.empty && editor.state.selection.from === editor.state.doc.content.size - 1;
 
-/** Focuses a block next to `id`: a text block at `target`, a divider as a whole. */
+/** Blocks without text (dividers, media, sublists) are focused as a whole. */
+export const isAtomic = (block: Block) => !isTextBlockType(block.type);
+
+/** Focuses a block next to `id`: a text block at `target`, any other block as a whole. */
 export function focusNeighbour(
   block: Block | undefined,
   target: Parameters<typeof focusBlock>[1],
 ): boolean {
   if (!block) return false;
-  if (block.type === "divider") {
-    document
-      .querySelector<HTMLElement>(`[data-block-id="${block.id}"] [role="separator"]`)
-      ?.focus();
+  if (isAtomic(block)) {
+    focusAtomic(block.id);
     return true;
   }
   focusBlock(block.id, target);
@@ -196,11 +206,13 @@ function backspace(ctx: KeyContext, block: Block, editor: Editor): boolean {
   const { prev } = neighbours(ctx, block.id);
   if (!prev) return true;
   const text = docToInline(editor.getJSON());
-  // Backspace after a divider removes the divider [assumption].
+  // Backspace after a divider removes the divider [assumption]; after media or a sublist it
+  // selects that block first, so a second Backspace deletes it.
   if (prev.type === "divider") {
     ctx.commands.run([{ op: "delete", id: prev.id }], { focus: { id: block.id, target: "start" } });
     return true;
   }
+  if (isAtomic(prev)) return focusNeighbour(prev, "end");
   if (!ctx.isSaved(block.id) && text.length === 0) return true;
   merge(ctx, prev, block, text);
   return true;
@@ -214,6 +226,7 @@ function forwardDelete(ctx: KeyContext, block: Block, editor: Editor): boolean {
     ctx.commands.run([{ op: "delete", id: next.id }], { focus: { id: block.id, target: "end" } });
     return true;
   }
+  if (isAtomic(next)) return focusNeighbour(next, "start");
   const nextText = editorFor(next.id)
     ? docToInline((editorFor(next.id) as Editor).getJSON())
     : inlineOf(next);
@@ -262,6 +275,21 @@ export function turnInto(
     : inlineOf(block);
   const caret = remove ? { offset: Math.max(0, remove.from - 1) } : "end";
   const { next } = neighbours(ctx, block.id);
+  if (isReferenceBlockType(block.type)) return;
+  if (isReferenceBlockType(type)) {
+    // Media and sublists are new blocks of their own below this one (they replace it when
+    // it's an empty paragraph).
+    if (remove) {
+      setText(editor, text);
+      if (ctx.isSaved(block.id)) {
+        ctx.commands.run([upsert(ctx, block, { content: { inline: text } })]);
+      }
+    }
+    const replace = text.length === 0 && block.type === "paragraph";
+    const anchor = ctx.rows().find((b) => b.id === block.id) ?? block;
+    void insertReference(ctx, anchor, type as "image" | "attachment" | "sublist", replace);
+    return;
+  }
   if (type === "divider") {
     const after = positionBetween(block.position, next?.position ?? null);
     const paragraph = uuidv7();
@@ -350,6 +378,7 @@ function insertOps(drafts: readonly BlockDraft[], after: string | null, before: 
       position: positions[i] as string,
       indent: isIndentable(d.type) ? d.indent : 0,
       content: d.content,
+      ...(d.fileId ? { fileId: d.fileId } : {}),
     } satisfies BlockFields,
   }));
 }
@@ -385,7 +414,8 @@ export function pasteIntoBlock(
   const queue: BlockDraft[] = [];
   const firstInline = "inline" in first.content ? first.content.inline : null;
 
-  if (before.length === 0 && after.length === 0) {
+  // An empty block takes the first pasted block's type, unless that's media (a new block).
+  if (before.length === 0 && after.length === 0 && !isReferenceBlockType(first.type)) {
     setText(editor, firstInline ?? []);
     ops.push(
       upsert(ctx, block, { type: first.type, indent: first.indent, content: first.content }),
@@ -617,7 +647,7 @@ export function handleBlockKey(
   }
 }
 
-/** Keys on a focused divider: move, delete, or open a paragraph below. */
+/** Keys on a focused divider, media or sublist block: move, delete, or open a paragraph below. */
 export function handleDividerKey(ctx: KeyContext, block: Block, event: KeyboardEvent): boolean {
   if (history(ctx, event)) return true;
   if (startSelection(ctx, block, event, null)) return true;
@@ -675,6 +705,8 @@ export function blockAction(ctx: KeyContext, block: Block, action: BlockAction):
     case "duplicate": {
       const id = uuidv7();
       const current = ctx.rows().find((b) => b.id === block.id) ?? block;
+      // A sublist is a whole list: Duplicate list (its own ⋮ menu) copies it.
+      if (current.type === "sublist") return;
       ctx.commands.run(
         [
           {
@@ -685,11 +717,13 @@ export function blockAction(ctx: KeyContext, block: Block, action: BlockAction):
               position: positionBetween(current.position, next?.position ?? null),
               indent: current.indent,
               content: current.content,
+              ...(current.fileId ? { fileId: current.fileId } : {}),
             },
           },
         ],
-        current.type === "divider" ? {} : { focus: { id, target: "end" } },
+        isAtomic(current) ? {} : { focus: { id, target: "end" } },
       );
+      if (isAtomic(current)) focusAtomic(id);
       return;
     }
     case "delete":

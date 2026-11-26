@@ -367,6 +367,38 @@ Decision:
 ## D-049 — Libraries pinned in M2.2  (2026-11-26 · Accepted)
 Decision: Tiptap **3.35.0** in apps/web: `@tiptap/core`, `@tiptap/react`, `@tiptap/pm`, `@tiptap/extensions` and the extensions `document`, `paragraph`, `text`, `hard-break`, `bold`, `italic`, `strike`, `code`, `link` (no StarterKit). `apps/e2e` gets the DOM lib for `page.evaluate` callbacks.
 
+## D-050 — Media blocks and attachment files (M2.3)  (2026-11-26 · Accepted · widens D-037's upload types)
+Decision:
+- Block types `image` and `attachment` (migration 0005: `blocks.file_id`, FK set null, indexed; a CHECK allows `file_id` only on them). Content is `{ file: {name, mime, sizeBytes, width, height} | null, caption }` (strict objects, caption ≤ 2000); the server always fills `file` from the `files` row, never from the client. A block needs a **ready** file in the root list's workspace; `image` needs an inline type (JPEG/PNG/WebP/GIF), anything else is an attachment `[assumption]`.
+- Media blocks are created only after the upload completes; meanwhile the editor shows a local progress row (XHR upload progress in `uploadFile`). Slash on an empty paragraph replaces it; paste and drop add blocks below.
+- `uploadMimes` → any `type/subtype` (`uploadMimeSchema`); images are still checked by magic bytes. Downloads of non-images are signed with `Content-Type: application/octet-stream` and `Content-Disposition: attachment`, so uploaded HTML/SVG never renders from the bucket. New platform adapter `downloadFile`.
+- Reference types (`image`, `attachment`, `sublist`) never change type (`resolveBlockShape` refuses), and Turn into hides them. Dividers, media and sublists are "atomic": focused as a whole via `[data-atomic]`; Backspace after one selects it (dividers are still deleted at once).
+Alternatives: creating the block at once with a pending file (other clients would see broken images).
+
+## D-051 — Sublists (M2.3)  (2026-11-26 · Accepted)
+Decision:
+- `blocks.sublist_id` (unique, FK cascade) and `lists.parent_block_id` (FK set null). An upsert creating a `sublist` block carries `sublist: {id, title}`; the server inserts the list (same workspace and root, `parent_list_id` = the list), then the block, then links `parent_block_id`. Resending the same `sublist` on an existing block is allowed (restores).
+- Deleting a sublist block soft-deletes the child tree with `trash_root_id` = the block; restoring the block (undo) restores it. Deleting a sublist from its own page also soft-deletes its parent block (trash root = the list) and lands on the parent `[assumption]`. `subtreeIds` (recursive CTE on `parent_list_id`) is the one tree walk.
+- `GET /lists` returns sublists too (breadcrumbs, starring); All lists filters roots. Sublist pages subscribe to `list:<rootId>`. Breadcrumb: up to 3 levels, else root › … › last two.
+- The row's title edits in place (rename waits for the parent store's flush; optimistic version 0 → `baseVersion` ≥ 1); its arrow or Mod+Enter opens it. No block Duplicate for sublists; a copied sublist pastes as its title `[assumption]`. Open-task count arrives with tasks.
+
+## D-052 — List covers and Customize (M2.3)  (2026-11-26 · Accepted · settles D-028's resizing)
+Decision:
+- `PATCH /lists/:id` takes `cover`: `{builtin}` (any of the 8 `BUILTIN_COVERS`, now in packages/shared), `{fileId}` (a ready inline image in the list's workspace) or `null`; the DTO exposes `cover` (+ `parentBlockId`).
+- Customize (gear on the cover, and in the ⋮ menu so a list without a cover can get one `[assumption]`): emoji via the existing picker, six built-ins (the ones Inbox/Today don't use), upload, remove. Uploaded covers are scaled **in the browser** to a 2400px longer edge (WebP, JPEG on WebKit; `files/resize.ts`); no server image library (owner's call). Image blocks keep their originals.
+- List routes declare `panel: {kind: "list"}`; the shell resolves it to a `PanelCover` from the list cache. No cover → no panel.
+
+## D-053 — Duplicate list and the ⋮ menu (M2.3)  (2026-11-26 · Accepted)
+Decision:
+- `POST /lists/:id/duplicate` (`list.view` + `workspace.createList`; client id for the copy): copies the list and its live sublist tree with new ids, blocks with their positions/content, sublist links remapped; files are referenced, not copied `[assumption]`. Title "<title> (copy)"; starred right after the original in the same section when the original is starred. A duplicated sublist becomes a root list `[assumption]`. Also in the sidebar entry context menu.
+- ⋮ menu: Customize · Print list · Duplicate list · Go to <team> (team workspaces only) · Delete. Print = `printPage` adapter (`window.print()`) with Tailwind `print:` variants hiding the chrome. **Mark all incomplete moves to M3.1** (owner's call: nothing to reset before tasks).
+
+## D-054 — Moving blocks to another list (M2.3)  (2026-11-26 · Accepted)
+Decision: `POST /lists/:id/blocks/move-to {ids, targetListId}` (`list.edit` on both, same workspace, not into the moved sublist's own tree): blocks keep their order at the end of the target (indent 0); moved sublists take their trees along (`root_list_id` of lists and their blocks updated). Events: block deletes on the source root channel first, then upserts on the target's. Client: drag a block onto a sublist row (middle half of the row's resting rect; rows hold still while hovering) or a sidebar list (pointer hit-test); the source cache drops the rows at once, the move isn't undoable and clears the undo stack `[assumption]`.
+
+## D-055 — Per-user list view settings (M2.3)  (2026-11-26 · Accepted)
+Decision: `GET/PATCH /lists/:id/prefs` (`list.view`; `runMutation`) on `list_view_prefs`; a `listPrefs` change event on `user:<id>` with `version` = `updated_at` in ms. The funnel menu offers Show tasks only, Hide completed tasks and the sorts that work so far (`AVAILABLE_LIST_SORTS`: Manual, Alphabetical); M3 adds the task-field sorts. `viewBlocks` renders the view without touching positions; Alphabetical sorts blocks by text until tasks exist, textless last `[assumption]`; a sorted view turns drag off and shows "Sorted by X · Reset"; ↑/↓ still follow stored order (Backlog). No new libraries in M2.3.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

@@ -1,7 +1,7 @@
 import type { ChangeEvent, ListIndexItem, Sidebar } from "@flolist/shared";
 import type { QueryClient } from "@tanstack/react-query";
 import { applyBlockChange, type BlockChangeEvent } from "../editor/store.ts";
-import { listKey, listsKey, sidebarKey } from "../lists/api.ts";
+import { listKey, listPrefsKey, listsKey, sidebarKey } from "../lists/api.ts";
 import {
   removeEntry,
   removeList,
@@ -14,6 +14,7 @@ import {
 /** Mutation keys: while one is pending, live events for the same data wait for its refetch. */
 export const mutationKeys = {
   list: (id: string) => ["list", id] as const,
+  listPrefs: (id: string) => ["listPrefs", id] as const,
   sidebar: ["sidebar"] as const,
 };
 
@@ -79,6 +80,10 @@ export function applyChange(qc: QueryClient, event: ChangeEvent): void {
       });
       return;
     }
+    case "listPrefs":
+      if (qc.isMutating({ mutationKey: mutationKeys.listPrefs(event.id) }) > 0) return;
+      qc.setQueryData(listPrefsKey(event.id), event.data);
+      return;
     case "block":
       // Blocks merge with the editor's own queue instead of waiting on mutations (D-045).
       applyBlockChange(qc, event as BlockChangeEvent);

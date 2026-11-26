@@ -8,7 +8,7 @@ import { clientMutationSchema } from "./lists.ts";
  * editor can load and save it without conversion.
  */
 
-/** Block types built so far. `task`, `sublist`, `image` and `attachment` arrive with M2.3/M3.1. */
+/** Block types built so far. `task` arrives with M3.1. */
 export const TEXT_BLOCK_TYPES = [
   "paragraph",
   "heading1",
@@ -18,7 +18,14 @@ export const TEXT_BLOCK_TYPES = [
   "numbered",
   "quote",
 ] as const;
-export const BLOCK_TYPES = [...TEXT_BLOCK_TYPES, "divider"] as const;
+/** Blocks that point at a file (`file_id`). */
+export const MEDIA_BLOCK_TYPES = ["image", "attachment"] as const;
+export const BLOCK_TYPES = [
+  ...TEXT_BLOCK_TYPES,
+  "divider",
+  ...MEDIA_BLOCK_TYPES,
+  "sublist",
+] as const;
 
 export const textBlockTypeSchema = z.enum(TEXT_BLOCK_TYPES);
 export type TextBlockType = z.infer<typeof textBlockTypeSchema>;
@@ -26,7 +33,20 @@ export const blockTypeSchema = z.enum(BLOCK_TYPES);
 export type BlockType = z.infer<typeof blockTypeSchema>;
 
 export function isTextBlockType(type: BlockType): type is TextBlockType {
-  return type !== "divider";
+  return (TEXT_BLOCK_TYPES as readonly string[]).includes(type);
+}
+
+export type MediaBlockType = (typeof MEDIA_BLOCK_TYPES)[number];
+export function isMediaBlockType(type: BlockType): type is MediaBlockType {
+  return type === "image" || type === "attachment";
+}
+
+/**
+ * Blocks that own a reference (a file or a child list). Their type is fixed: they can't be
+ * turned into another type, and no other block can be turned into one.
+ */
+export function isReferenceBlockType(type: BlockType): boolean {
+  return isMediaBlockType(type) || type === "sublist";
 }
 
 /** Types that take an indent level (Tab / Shift+Tab). */
@@ -83,21 +103,59 @@ export const DIVIDER_COLORS = ["gray", "red", "orange", "green", "blue", "purple
 export const dividerColorSchema = z.enum(DIVIDER_COLORS);
 export type DividerColor = z.infer<typeof dividerColorSchema>;
 
-export const textContentSchema = z.object({ inline: inlineContentSchema });
+export const MAX_CAPTION = 2000;
+
+export const textContentSchema = z.strictObject({ inline: inlineContentSchema });
 export type TextContent = z.infer<typeof textContentSchema>;
-export const dividerContentSchema = z.object({ color: dividerColorSchema });
+export const dividerContentSchema = z.strictObject({ color: dividerColorSchema });
 export type DividerContent = z.infer<typeof dividerContentSchema>;
-export const blockContentSchema = z.union([textContentSchema, dividerContentSchema]);
+
+/**
+ * What a media block shows about its file. The server copies it from the `files` row whenever
+ * the block's file is set, so clients can render without a second request.
+ */
+export const blockFileMetaSchema = z.strictObject({
+  name: z.string().max(255),
+  mime: z.string().max(255),
+  sizeBytes: z.number().int().nonnegative(),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+});
+export type BlockFileMeta = z.infer<typeof blockFileMetaSchema>;
+
+/** Image and attachment blocks; `caption` is shown for images only. */
+export const mediaContentSchema = z.strictObject({
+  file: blockFileMetaSchema.nullable(),
+  caption: z.string().max(MAX_CAPTION),
+});
+export type MediaContent = z.infer<typeof mediaContentSchema>;
+
+/** Sublist blocks keep nothing of their own: the title lives on the child list. */
+export const sublistContentSchema = z.strictObject({});
+export type SublistContent = z.infer<typeof sublistContentSchema>;
+
+export const blockContentSchema = z.union([
+  textContentSchema,
+  dividerContentSchema,
+  mediaContentSchema,
+  sublistContentSchema,
+]);
 export type BlockContent = z.infer<typeof blockContentSchema>;
 
 /** The content every new block of a type starts with. */
 export function emptyContent(type: BlockType): BlockContent {
-  return type === "divider" ? { color: "gray" } : { inline: [] };
+  if (type === "divider") return { color: "gray" };
+  if (isMediaBlockType(type)) return { file: null, caption: "" };
+  if (type === "sublist") return {};
+  return { inline: [] };
 }
 
-/** Does this content fit this type? (Text types need `inline`, dividers need `color`.) */
+/** Does this content fit this type? */
 export function contentMatchesType(type: BlockType, content: BlockContent): boolean {
-  return isTextBlockType(type) ? "inline" in content : "color" in content;
+  if (isTextBlockType(type)) return "inline" in content;
+  if (type === "divider") return "color" in content;
+  if (isMediaBlockType(type)) return "caption" in content;
+  return Object.keys(content).length === 0;
 }
 
 export const containerTypeSchema = z.enum(["list", "task"]);
@@ -112,6 +170,10 @@ export const blockSchema = z.object({
   type: blockTypeSchema,
   indent: z.number().int().min(0).max(MAX_INDENT),
   content: blockContentSchema,
+  /** The file of an image/attachment block. */
+  fileId: z.uuid().nullable(),
+  /** The child list of a sublist block. */
+  sublistId: z.uuid().nullable(),
   createdBy: z.uuid().nullable(),
   version: z.number().int(),
   createdAt: z.iso.datetime(),
@@ -137,6 +199,16 @@ export const upsertBlockOpSchema = z.object({
   position: positionSchema.optional(),
   indent: indentSchema.optional(),
   content: blockContentSchema.optional(),
+  /**
+   * Image/attachment blocks: a ready file in the list's workspace. Required on create, and may
+   * be swapped later (e.g. replacing an image).
+   */
+  fileId: z.uuid().optional(),
+  /**
+   * Sublist blocks, on create only: the child list's client-made id and title. The server
+   * creates the list with the block, in the same transaction.
+   */
+  sublist: z.object({ id: z.uuid(), title: z.string().max(500) }).optional(),
   /** The version the client last saw (accepted, not enforced yet; D-043). */
   baseVersion: z.number().int().positive().optional(),
 });
@@ -171,6 +243,20 @@ export const blockBatchSchema = clientMutationSchema.extend({
     }),
 });
 export type BlockBatch = z.infer<typeof blockBatchSchema>;
+
+/**
+ * `POST /lists/:id/blocks/move-to`: moves blocks of this list into another list (a drop on a
+ * sublist row or a sidebar list). They keep their order and land at the end of the target.
+ */
+export const moveBlocksToSchema = clientMutationSchema.extend({
+  ids: z
+    .array(z.uuid())
+    .min(1)
+    .max(MAX_BATCH_OPS)
+    .refine((ids) => new Set(ids).size === ids.length, { error: "Each block may appear once" }),
+  targetListId: z.uuid(),
+});
+export type MoveBlocksTo = z.infer<typeof moveBlocksToSchema>;
 
 /** The batch's effect: every changed block as it now is, and the ids that were deleted. */
 export const blockBatchResultSchema = z.object({
@@ -296,6 +382,13 @@ export function resolveBlockShape(
 ): ShapeResult {
   const type = fields.type ?? current?.type;
   if (!type) return { ok: false, error: "A new block needs a type and a position" };
+  if (
+    current &&
+    type !== current.type &&
+    (isReferenceBlockType(type) || isReferenceBlockType(current.type))
+  ) {
+    return { ok: false, error: `A ${current.type} block can't become a ${type} block` };
+  }
   let content = fields.content ?? current?.content ?? emptyContent(type);
   if (!contentMatchesType(type, content)) {
     if (fields.content) return { ok: false, error: `This content doesn't fit a ${type} block` };
