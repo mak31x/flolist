@@ -125,29 +125,6 @@ export function UpdatesView() {
   );
 }
 
-export function AllListsView() {
-  return (
-    <TabbedView
-      title="Lists"
-      label="Filter lists"
-      tabs={[
-        { value: "all", label: "All" },
-        { value: "shared", label: "Shared" },
-        { value: "private", label: "Private" },
-      ]}
-      message="Your lists will show up here."
-    />
-  );
-}
-
-export function ListView() {
-  return (
-    <Page title="Untitled list">
-      <EmptyTasks message="Start typing, or add a task." />
-    </Page>
-  );
-}
-
 export function TeamView() {
   return (
     <Page title="Team">

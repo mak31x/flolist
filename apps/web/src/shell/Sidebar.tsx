@@ -9,22 +9,12 @@ import {
   cn,
 } from "@flolist/ui";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-  ChevronDown,
-  FolderPlus,
-  ListPlus,
-  LogOut,
-  PanelLeft,
-  Plus,
-  Search,
-  Settings,
-  SquarePlus,
-  Trash2,
-} from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, LogOut, PanelLeft, Plus, Search, Settings, Trash2 } from "lucide-react";
 import { systemViews } from "./nav.ts";
 import { useShell } from "./ui-store.ts";
 import { useMe, useSignOut } from "../features/auth/hooks.ts";
+import { QuickCreate } from "../features/lists/QuickCreate.tsx";
+import { SidebarLists } from "../features/lists/SidebarLists.tsx";
 
 type SidebarProps = {
   /** Called after a navigation link is used (closes the phone drawer). */
@@ -75,65 +65,18 @@ export function Sidebar({ onNavigate, inDrawer = false }: SidebarProps) {
         ))}
       </ul>
 
-      <FavoritesSection />
+      <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3">
+        <SidebarLists onNavigate={onNavigate} />
+      </div>
 
-      <div className="flex-1" />
-
-      <div className="flex items-center justify-between">
-        <QuickCreate />
+      <div className="flex items-center justify-between pt-2">
+        <QuickCreate
+          {...(onNavigate ? { onNavigate } : {})}
+          trigger={<IconButton label="Create" icon={<Plus />} variant="chip" tooltip={false} />}
+        />
         <AvatarMenu {...(onNavigate ? { onNavigate } : {})} />
       </div>
     </nav>
-  );
-}
-
-function FavoritesSection() {
-  const [open, setOpen] = useState(true);
-  return (
-    <section className="mt-6" aria-labelledby="sidebar-favorites">
-      <button
-        type="button"
-        id="sidebar-favorites"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen((o) => !o);
-        }}
-        className="flex h-7 w-full cursor-pointer items-center gap-1 rounded-md px-2 text-secondary font-semibold text-text-muted hover:text-text"
-      >
-        Favorites
-        <ChevronDown
-          aria-hidden
-          className={cn(
-            "size-3.5 transition-transform duration-(--motion-fast)",
-            !open && "-rotate-90",
-          )}
-        />
-      </button>
-      {open && (
-        <p className="px-2 py-1.5 text-secondary text-text-subtle">Star a list to pin it here.</p>
-      )}
-    </section>
-  );
-}
-
-function QuickCreate() {
-  return (
-    <Menu>
-      <MenuTrigger asChild>
-        <IconButton label="Create" icon={<Plus />} variant="chip" tooltip={false} />
-      </MenuTrigger>
-      <MenuContent side="top" align="start">
-        <MenuItem icon={<SquarePlus />} disabled>
-          New task
-        </MenuItem>
-        <MenuItem icon={<ListPlus />} disabled>
-          New list
-        </MenuItem>
-        <MenuItem icon={<FolderPlus />} disabled>
-          New section
-        </MenuItem>
-      </MenuContent>
-    </Menu>
   );
 }
 

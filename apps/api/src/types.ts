@@ -22,6 +22,8 @@ export interface AppEnv {
     /** Unset only in apps built without a database (unit tests); read it with `dbOf(c)`. */
     db: Db | undefined;
     user: AuthUser | null;
+    /** Called after a mutation commits (drains the outbox to WebSocket clients). */
+    afterMutation: (() => void) | undefined;
   };
 }
 

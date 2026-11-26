@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { decide, permissionFixtures, workspaceActions } from "./index.ts";
+import {
+  allPermissionFixtures,
+  decide,
+  listActions,
+  listPermissionFixtures,
+  permissionFixtures,
+  sectionActions,
+  sectionPermissionFixtures,
+  workspaceActions,
+} from "./index.ts";
 
 describe("permission matrix", () => {
   // Deleted resources are resolved before the matrix runs (the API sees role = null).
@@ -13,7 +22,7 @@ describe("permission matrix", () => {
   });
 
   it("has unique fixture names", () => {
-    const names = permissionFixtures.map((f) => f.name);
+    const names = allPermissionFixtures.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
   });
 
@@ -33,5 +42,45 @@ describe("permission matrix", () => {
         }
       }
     }
+  });
+});
+
+describe("list and section matrix", () => {
+  const listCases = listPermissionFixtures.filter((f) => !f.setup.list.deleted);
+  it.each(listCases.map((f) => [f.name, f] as const))("%s", (_name, f) => {
+    const role = f.setup.actorRole === "none" ? null : f.setup.actorRole;
+    expect(decide(f.action, { type: "list", role })).toBe(f.expected);
+  });
+
+  it.each(sectionPermissionFixtures.map((f) => [f.name, f] as const))("%s", (_name, f) => {
+    const role = f.setup.actorRole === "none" ? null : f.setup.actorRole;
+    expect(decide(f.action, { type: "section", role, isDefault: f.setup.section.isDefault })).toBe(
+      f.expected,
+    );
+  });
+
+  it("covers every list and section action for every role", () => {
+    for (const role of ["creator", "none"] as const) {
+      for (const action of listActions) {
+        expect(
+          listPermissionFixtures.some((f) => f.action === action && f.setup.actorRole === role),
+          `list/${role}/${action}`,
+        ).toBe(true);
+      }
+    }
+    for (const role of ["owner", "none"] as const) {
+      for (const action of sectionActions) {
+        expect(
+          sectionPermissionFixtures.some((f) => f.action === action && f.setup.actorRole === role),
+          `section/${role}/${action}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("never lets a workspace subject do list actions", () => {
+    expect(decide("list.view", { type: "workspace", kind: "personal", role: "owner" })).toBe(
+      "forbidden",
+    );
   });
 });

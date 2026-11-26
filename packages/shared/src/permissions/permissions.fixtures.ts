@@ -10,7 +10,16 @@
  * into rows (a workspace of `kind`, the actor with `actorRole`, or not a member at all).
  * Add a case whenever an action or rule is added. Cases must stay unique by `name`.
  */
-import type { Action, Decision, WorkspaceKind, WorkspaceRole } from "./index.ts";
+import type {
+  Action,
+  Decision,
+  ListAction,
+  ListRole,
+  SectionAction,
+  WorkspaceAction,
+  WorkspaceKind,
+  WorkspaceRole,
+} from "./index.ts";
 
 export interface WorkspaceFixtureSetup {
   workspace: { kind: WorkspaceKind; deleted?: boolean };
@@ -21,7 +30,7 @@ export interface WorkspaceFixtureSetup {
 export interface PermissionFixture {
   name: string;
   setup: WorkspaceFixtureSetup;
-  action: Action;
+  action: WorkspaceAction;
   resource: { type: "workspace" };
   expected: Decision;
 }
@@ -30,7 +39,7 @@ const ws = (
   name: string,
   kind: WorkspaceKind,
   actorRole: WorkspaceRole | "none",
-  action: Action,
+  action: WorkspaceAction,
   expected: Decision,
   extra: { deleted?: boolean } = {},
 ): PermissionFixture => ({
@@ -78,6 +87,23 @@ export const permissionFixtures: readonly PermissionFixture[] = [
   ws("team owner uploads files", "team", "owner", "workspace.uploadFile", "allow"),
   ws("team member uploads files", "team", "member", "workspace.uploadFile", "allow"),
   ws("non-member can't upload into a team", "team", "none", "workspace.uploadFile", "not_found"),
+  ws("personal owner creates lists", "personal", "owner", "workspace.createList", "allow"),
+  ws(
+    "stranger can't create lists in a personal ws",
+    "personal",
+    "none",
+    "workspace.createList",
+    "not_found",
+  ),
+  ws("team owner creates lists", "team", "owner", "workspace.createList", "allow"),
+  ws("team member creates lists", "team", "member", "workspace.createList", "allow"),
+  ws(
+    "non-member can't create lists in a team",
+    "team",
+    "none",
+    "workspace.createList",
+    "not_found",
+  ),
   ws("non-member can't see a team", "team", "none", "workspace.view", "not_found"),
   ws("non-member can't rename a team", "team", "none", "workspace.update", "not_found"),
   ws("non-member can't delete a team", "team", "none", "workspace.delete", "not_found"),
@@ -93,4 +119,81 @@ export const permissionFixtures: readonly PermissionFixture[] = [
   ws("deleted team is gone for its owner", "team", "owner", "workspace.view", "not_found", {
     deleted: true,
   }),
+];
+
+/** List cases. `actorRole` grows with sharing (M7.2): collaborator, viewer, team owner. */
+export interface ListPermissionFixture {
+  name: string;
+  setup: { list: { deleted?: boolean }; actorRole: ListRole | "none" };
+  action: ListAction;
+  resource: { type: "list" };
+  expected: Decision;
+}
+
+const list = (
+  name: string,
+  actorRole: ListRole | "none",
+  action: ListAction,
+  expected: Decision,
+  extra: { deleted?: boolean } = {},
+): ListPermissionFixture => ({
+  name,
+  setup: { list: extra, actorRole },
+  action,
+  resource: { type: "list" },
+  expected,
+});
+
+export const listPermissionFixtures: readonly ListPermissionFixture[] = [
+  list("creator views own list", "creator", "list.view", "allow"),
+  list("creator edits own list", "creator", "list.edit", "allow"),
+  list("creator manages own list", "creator", "list.manage", "allow"),
+  list("stranger can't see a private list", "none", "list.view", "not_found"),
+  list("stranger can't edit a private list", "none", "list.edit", "not_found"),
+  list("stranger can't delete a private list", "none", "list.manage", "not_found"),
+  list("deleted list is gone for its creator", "creator", "list.view", "not_found", {
+    deleted: true,
+  }),
+  list("deleted list can't be edited", "creator", "list.edit", "not_found", { deleted: true }),
+];
+
+/** Section cases: sections are private to their user. */
+export interface SectionPermissionFixture {
+  name: string;
+  setup: { section: { isDefault: boolean }; actorRole: "owner" | "none" };
+  action: SectionAction;
+  resource: { type: "section" };
+  expected: Decision;
+}
+
+const section = (
+  name: string,
+  actorRole: "owner" | "none",
+  isDefault: boolean,
+  action: SectionAction,
+  expected: Decision,
+): SectionPermissionFixture => ({
+  name,
+  setup: { section: { isDefault }, actorRole },
+  action,
+  resource: { type: "section" },
+  expected,
+});
+
+export const sectionPermissionFixtures: readonly SectionPermissionFixture[] = [
+  section("owner views own section", "owner", false, "section.view", "allow"),
+  section("owner updates own section", "owner", false, "section.update", "allow"),
+  section("owner deletes own section", "owner", false, "section.delete", "allow"),
+  section("owner renames Favorites", "owner", true, "section.update", "allow"),
+  section("owner can't delete Favorites", "owner", true, "section.delete", "forbidden"),
+  section("stranger can't see a section", "none", false, "section.view", "not_found"),
+  section("stranger can't update a section", "none", false, "section.update", "not_found"),
+  section("stranger can't delete a section", "none", false, "section.delete", "not_found"),
+];
+
+/** Every fixture, for name-uniqueness checks. */
+export const allPermissionFixtures: readonly { name: string; action: Action }[] = [
+  ...permissionFixtures,
+  ...listPermissionFixtures,
+  ...sectionPermissionFixtures,
 ];

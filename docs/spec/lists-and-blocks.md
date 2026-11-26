@@ -18,6 +18,7 @@
 - Starring a list adds it to Favorites. Unstarring removes it from the sidebar only (the list is still in All lists).
 - Drag lists between sections and drag sections to reorder them. Deleting a section never deletes its lists. They are unpinned from the sidebar but stay available in All lists [assumption].
 - Sidebar state is per user: `sidebar_entries(user, list, section, position)` and `sections(user, title, position, collapsed)`.
+- Favorites can be renamed; a user has at most 200 sections; sections reorder by mouse/touch only for now (D-044) [assumption].
 
 ## Sublists
 - The slash menu's "Sublist" block creates a child list inside the current list (or inside a task's details). It shows in the parent as a row with a list icon, its title, and a count of open tasks. Clicking it opens the sublist as a page with a breadcrumb `Parent › Sublist`.

@@ -39,6 +39,7 @@ Caddy (TLS · static web build · reverse proxy /api and /ws)
   - `{ type: "change", entity, id, version, op: "upsert"|"delete", data? }`: small entities include `data`; large ones cause a refetch.
   - `{ type: "access_changed" }`: refetch the list index and sidebar.
 - On reconnect, the client refetches its active queries.
+- Protocol v1 (D-043): the server sends `ready` with the joined channels; clients `subscribe`/`unsubscribe` `list:<id>` (authorized per join) and `ping`. Events also carry `clientMutationId`. Mutations write events to a transactional outbox that an in-process drainer publishes after commit (D-042).
 - Single node, in-process pub/sub. Postgres LISTEN/NOTIFY only if we ever scale out.
 - Presence (who is viewing a list) is optional, in M7.3.
 

@@ -15,10 +15,20 @@ export const workspaceActions = [
   "workspace.manageMembers",
   /** Upload a file into the workspace (D-037). Viewing files uses `workspace.view`. */
   "workspace.uploadFile",
+  /** Create a list owned by this workspace (lists-and-blocks.md → Lists). */
+  "workspace.createList",
 ] as const;
 export type WorkspaceAction = (typeof workspaceActions)[number];
 
-export type Action = WorkspaceAction;
+/** `manage` = move between workspaces and delete (data-model.md → canManageList). */
+export const listActions = ["list.view", "list.edit", "list.manage"] as const;
+export type ListAction = (typeof listActions)[number];
+
+/** Sidebar sections are private to their user. */
+export const sectionActions = ["section.view", "section.update", "section.delete"] as const;
+export type SectionAction = (typeof sectionActions)[number];
+
+export type Action = WorkspaceAction | ListAction | SectionAction;
 
 export type WorkspaceRole = "owner" | "member";
 export type WorkspaceKind = "personal" | "team";
@@ -30,7 +40,24 @@ export interface WorkspaceSubject {
   role: WorkspaceRole | null;
 }
 
-export type Subject = WorkspaceSubject;
+/**
+ * What the caller is to one list (resolved through its root). Only the creator exists until
+ * sharing (M7.2) adds collaborator, viewer and the owning team's owner.
+ */
+export type ListRole = "creator";
+export interface ListSubject {
+  type: "list";
+  role: ListRole | null;
+}
+
+export interface SectionSubject {
+  type: "section";
+  role: "owner" | null;
+  /** The "Favorites" section can't be deleted [assumption]. */
+  isDefault: boolean;
+}
+
+export type Subject = WorkspaceSubject | ListSubject | SectionSubject;
 
 type Matrix = Record<WorkspaceKind, Record<WorkspaceRole, readonly WorkspaceAction[]>>;
 
@@ -41,7 +68,7 @@ type Matrix = Record<WorkspaceKind, Record<WorkspaceRole, readonly WorkspaceActi
  */
 const workspaceMatrix: Matrix = {
   personal: {
-    owner: ["workspace.view", "workspace.update", "workspace.uploadFile"],
+    owner: ["workspace.view", "workspace.update", "workspace.uploadFile", "workspace.createList"],
     member: [],
   },
   team: {
@@ -51,19 +78,40 @@ const workspaceMatrix: Matrix = {
       "workspace.delete",
       "workspace.manageMembers",
       "workspace.uploadFile",
+      "workspace.createList",
     ],
-    member: ["workspace.view", "workspace.uploadFile"],
+    member: ["workspace.view", "workspace.uploadFile", "workspace.createList"],
   },
+};
+
+const listMatrix: Record<ListRole, readonly ListAction[]> = {
+  creator: ["list.view", "list.edit", "list.manage"],
 };
 
 /** Whether the subject can see the resource at all. */
 export function canSee(subject: Subject): boolean {
-  return subject.role !== null && can("workspace.view", subject);
+  if (subject.role === null) return false;
+  switch (subject.type) {
+    case "workspace":
+      return can("workspace.view", subject);
+    case "list":
+      return can("list.view", subject);
+    case "section":
+      return true;
+  }
 }
 
 export function can(action: Action, subject: Subject): boolean {
   if (subject.role === null) return false;
-  return workspaceMatrix[subject.kind][subject.role].includes(action);
+  switch (subject.type) {
+    case "workspace":
+      return (workspaceMatrix[subject.kind][subject.role] as readonly Action[]).includes(action);
+    case "list":
+      return (listMatrix[subject.role] as readonly Action[]).includes(action);
+    case "section":
+      if (action === "section.delete") return !subject.isDefault;
+      return (sectionActions as readonly Action[]).includes(action);
+  }
 }
 
 export type Decision = "allow" | "forbidden" | "not_found";

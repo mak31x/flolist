@@ -1,4 +1,4 @@
-import { member, organization, user, workspaces, type Db } from "@flolist/db";
+import { lists, member, organization, sections, user, workspaces, type Db } from "@flolist/db";
 import { eq } from "drizzle-orm";
 import type { WorkspaceKind, WorkspaceRole } from "@flolist/shared";
 import { createApp, type AppDeps } from "../src/app.ts";
@@ -108,3 +108,76 @@ export const jsonBody = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
   headers: { "content-type": "application/json" },
 });
+
+/** A request with a JSON body and the given method. */
+export const send = (method: string, body: unknown): RequestInit => ({
+  method,
+  body: JSON.stringify(body),
+  headers: { "content-type": "application/json" },
+});
+
+/** A root list created by `owner` directly in the database. */
+export async function makeList(
+  db: Db,
+  owner: AuthUser,
+  values: { title?: string; workspaceId?: string; deleted?: boolean } = {},
+) {
+  const workspaceId = values.workspaceId ?? (await makePersonalWorkspace(db, owner)).id;
+  const id = crypto.randomUUID();
+  const [row] = await db
+    .insert(lists)
+    .values({
+      id,
+      rootListId: id,
+      workspaceId,
+      title: values.title ?? "A list",
+      createdBy: owner.id,
+      deletedAt: values.deleted ? new Date() : null,
+    })
+    .returning();
+  if (!row) throw new Error("insert list failed");
+  return row;
+}
+
+export async function makeSection(
+  db: Db,
+  owner: AuthUser,
+  values: { title?: string; position?: string; isDefault?: boolean } = {},
+) {
+  const [row] = await db
+    .insert(sections)
+    .values({
+      userId: owner.id,
+      title: values.title ?? "Section",
+      position: values.position ?? "a5",
+      isDefault: values.isDefault ?? false,
+    })
+    .returning();
+  if (!row) throw new Error("insert section failed");
+  return row;
+}
+
+/** The world a list permission fixture describes. */
+export async function buildListFixture(
+  db: Db,
+  setup: { list: { deleted?: boolean }; actorRole: "creator" | "none" },
+) {
+  const actor = await makeUser(db, "Actor");
+  const other = await makeUser(db, "Other");
+  const list = await makeList(db, setup.actorRole === "creator" ? actor : other, {
+    deleted: setup.list.deleted ?? false,
+  });
+  return { actor, list };
+}
+
+export async function buildSectionFixture(
+  db: Db,
+  setup: { section: { isDefault: boolean }; actorRole: "owner" | "none" },
+) {
+  const actor = await makeUser(db, "Actor");
+  const other = await makeUser(db, "Other");
+  const section = await makeSection(db, setup.actorRole === "owner" ? actor : other, {
+    isDefault: setup.section.isDefault,
+  });
+  return { actor, section };
+}

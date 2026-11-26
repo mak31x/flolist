@@ -4,6 +4,8 @@ import { Link, Navigate, Outlet, useLocation, useMatches, useParams } from "@tan
 import { Bell, Menu as MenuIcon, PanelLeft, PanelRightOpen, Plus, Search } from "lucide-react";
 import { meQuery } from "../features/auth/api.ts";
 import { useServerThemeSync } from "../features/auth/hooks.ts";
+import { QuickCreate } from "../features/lists/QuickCreate.tsx";
+import { LiveSyncProvider } from "../features/sync/LiveSync.tsx";
 import { RightPanel, type PanelMode } from "./RightPanel.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { useShell } from "./ui-store.ts";
@@ -17,7 +19,13 @@ const noPanel: PanelMode = { kind: "none" };
 export function AppShell() {
   const { data: me } = useQuery(meQuery);
   const location = useLocation();
-  if (me) return <Shell />;
+  if (me) {
+    return (
+      <LiveSyncProvider>
+        <Shell />
+      </LiveSyncProvider>
+    );
+  }
   // `undefined` = refetching or failed: wait rather than bounce. Once on /login this layout is
   // about to unmount; redirecting again would nest `?redirect=` forever.
   if (me === null && location.pathname !== "/login") {
@@ -114,16 +122,24 @@ function MobileHeader({ onOpenDrawer }: { onOpenDrawer: () => void }) {
 
 /** Phone only: Quick create FAB (bottom centre) and Updates (bottom right). */
 function MobileBar() {
+  const setDrawerOpen = useShell((s) => s.setDrawerOpen);
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex items-end justify-center px-4 pb-[calc(16px+env(safe-area-inset-bottom))] md:hidden">
-      <button
-        type="button"
-        aria-label="Create"
-        disabled
-        className="pointer-events-auto inline-flex size-12 items-center justify-center rounded-full bg-accent text-on-accent shadow-lifted"
-      >
-        <Plus className="size-5" />
-      </button>
+      <QuickCreate
+        align="center"
+        revealSidebar={() => {
+          setDrawerOpen(true);
+        }}
+        trigger={
+          <button
+            type="button"
+            aria-label="Create"
+            className="pointer-events-auto inline-flex size-12 cursor-pointer items-center justify-center rounded-full bg-accent text-on-accent shadow-lifted"
+          >
+            <Plus className="size-5" />
+          </button>
+        }
+      />
       <Link
         to="/updates"
         aria-label="Updates"

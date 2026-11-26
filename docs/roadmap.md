@@ -4,12 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M1.2 Profile settings + files (done; PR from `phase/M1.2-profile-files`). Settings → Profile (photo with crop, first/last name, time zone, first day of week, app language), a files service, My Week honours the week start (D-037–D-039).
-- **State:** `files` table (pending → ready) + `user/workspaces.avatar_file_id` FKs. `POST /api/v1/uploads` reserves and returns a PUT target; `PUT /api/v1/uploads/:id/content` (relay mode) or a presigned URL (direct mode, `S3_DIRECT_UPLOAD=true`); `POST …/:id/complete` checks size + magic bytes; `GET /api/v1/files/:id` → 302 to a presigned GET. `PATCH /api/v1/me` takes any profile field. Storage is `apps/api/src/storage` (AWS SDK v3, S3-generic). Web: `features/profile`, `features/files/upload.ts`, `platform/` adapters, `i18n/t()`, `workspacesQuery`, `useUpdateMe` (optimistic).
-- **Run / verify:** `pnpm infra:up` (now also sets bucket CORS), `pnpm dev`, then http://localhost:5174/settings/profile. `pnpm check` (API tests start Postgres + RustFS containers); `pnpm test:e2e` (profile flow included; CI's e2e job has a RustFS service).
-- **Prod before merging:** create the OCI bucket + Customer Secret Keys and set `S3_*` with `S3_DIRECT_UPLOAD=false` in `/opt/flolist/.env` (docs/deploy-oracle.md → Files env), then upload a photo on the live site. Without them uploads answer 503; nothing else breaks. Presigned GETs against OCI are untested.
-- **Gotchas:** V8/WebKit report legacy zone names (Asia/Calcutta); `platform/modernZone()` maps them. AWS SDK checksums are off (`WHEN_REQUIRED`) or presigned PUTs break. Uploads are images only (`uploadMimes`). Profile names are keyed on their saved value, so a remote change resets the field. Stale `pending` files aren't cleaned up yet (Backlog). Migrations stay forward-only.
-- **Next:** M2.1 Lists + sidebar + live sync (lists CRUD, sections, sidebar reorder, All lists, WebSocket hub v1 + outbox + `applyChange`). `uuidv7()` from packages/shared is the client id generator.
+- **Last phase:** M2.1 Lists + sidebar + live sync (done; PR from `phase/M2.1-lists-sidebar-sync`). Lists CRUD, emoji picker, star/unstar, sections, sidebar drag reorder, All lists page, WebSocket live sync (D-040–D-044).
+- **State:** migration 0003 adds `lists`, `list_view_prefs` (holds `last_opened_at`), `sections`, `sidebar_entries`, `outbox`, `applied_mutations`. Routes: `/api/v1/lists` (GET, POST, GET/PATCH/DELETE `/:id`, POST `/:id/open`), `/api/v1/sections`, `/api/v1/sidebar` (+ `PUT/DELETE /entries/:listId`). Every mutation goes through `runMutation()` (apps/api/src/sync/mutation.ts): idempotent per `clientMutationId`, `emit()` writes outbox rows in the same tx, `afterMutation` kicks the drainer → `Hub` → `/ws`.
+- **Web:** `features/lists` (api, cache helpers, `useOptimistic` mutations, SidebarLists with dnd-kit, ListPage, AllListsPage, QuickCreate), `features/sync` (LiveSocket, `applyChange`, `useListChannel`). Lists are private to their creator; only Personal is used (sharing = M7).
+- **Run / verify:** `pnpm infra:up`, `pnpm dev`, open two windows on http://localhost:5174 and create/rename/drag lists. `pnpm check`; `pnpm test:e2e` (lists.spec.ts runs two browser contexts).
+- **Gotchas:** positions are fractional-indexing keys compared byte-wise: sort with `collate "C"` in SQL and `compareKeys` in JS, never `localeCompare`. Radix menus must `preventDefault` `onCloseAutoFocus` when an action focuses an input (new list title, inline rename). Client skips socket events while a mutation with the same query key is pending, then invalidates. `/api/v1/*` now 401s before validation. The bundled API crashes in dev on pino-pretty (`__dirname`); prod mode is fine. Sections have no keyboard reorder yet (Backlog). Emoji data is self-hosted at `/emojibase` (Vite plugin).
+- **Next:** M2.2 Block editor core (blocks API with versions; per-block Tiptap, keyboard controller, slash menu, block drag, undo/redo). Reuse `runMutation`/`emit`, `list:<rootId>` channels and `applyChange`.
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -53,10 +53,10 @@ Specs: spec/settings-and-account.md (Profile)
 Done when: e2e edits the profile, uploads a photo and sees it all after a reload. The activity heatmap, export and account deletion stay in M6.3.
 
 ## M2 — Lists and the block editor
-### M2.1 Lists + sidebar + live sync `[ ]`
+### M2.1 Lists + sidebar + live sync `[x]`
 Specs: spec/lists-and-blocks.md (Lists, Sections), spec/views.md (Sidebar, All lists), architecture.md (Live sync)
-- [ ] Lists CRUD, emoji picker, star/unstar, sections CRUD, sidebar drag reorder, All lists page
-- [ ] WebSocket hub v1 + outbox + client `applyChange`
+- [x] Lists CRUD, emoji picker, star/unstar, sections CRUD, sidebar drag reorder, All lists page
+- [x] WebSocket hub v1 + outbox + client `applyChange`
 Done when: lists and sections persist, reorder, and sync live between two browser windows.
 ### M2.2 Block editor core `[ ]`
 Specs: spec/lists-and-blocks.md (Block types, Editor behaviour), decisions D-007
@@ -161,3 +161,5 @@ Done when (M4): a full day of work is possible without the mouse.
 - Move the older screens' inline English strings to `t()` (D-039)
 - Change the primary email with re-verification (settings-and-account.md marks it a Flolist extra)
 - Server-side image resizing/thumbnails in the worker for uploads (architecture.md → Uploads), with list covers
+- Keyboard reordering for sidebar sections (lists already reorder by keyboard; sections are mouse/touch only, D-044)
+- Fix `pnpm --filter api` bundled build crashing under dev NODE_ENV (pino-pretty transport resolves `__dirname`)

@@ -99,3 +99,15 @@ export function systemFirstDay(locale = systemLocale()): Weekday {
   }
   return 1;
 }
+
+/**
+ * The live-sync socket URL. The web app talks to its own origin (Caddy routes /ws to the API);
+ * native shells point at the configured server in M10/M11.
+ */
+export function socketUrl(): string {
+  const { protocol, host } = window.location;
+  return `${protocol === "https:" ? "wss" : "ws"}://${host}/ws`;
+}
+
+/** Opens a WebSocket (Tauri and Capacitor webviews provide the browser API). */
+export const openSocket = (url: string): WebSocket => new WebSocket(url);
