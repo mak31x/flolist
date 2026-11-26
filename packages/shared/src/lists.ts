@@ -115,10 +115,16 @@ export const LIST_SORTS = [
 export const listSortSchema = z.enum(LIST_SORTS);
 export type ListSort = z.infer<typeof listSortSchema>;
 
-/** Sorts that work before tasks exist (M3 adds the task-field sorts to the menu). */
+/**
+ * Sorts the menu offers so far. Priority, Due date and Label come with M3.2, Assignee with M7.3
+ * and Source with the integrations (M9).
+ */
 export const AVAILABLE_LIST_SORTS = [
   "manual",
+  "creator",
   "alphabetical",
+  "created",
+  "completed",
 ] as const satisfies readonly ListSort[];
 
 export const listViewPrefsSchema = z.object({

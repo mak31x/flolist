@@ -4,15 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M2.3 Media blocks, covers, sublists, list menu (done; PR from `phase/M2.3-media-sublists`). D-050–D-055.
-- **State:** migration 0005 adds `blocks.file_id`, `blocks.sublist_id` (unique) and the `lists.parent_block_id` FK; block types now include `image`, `attachment`, `sublist` (fixed type: no Turn into to or from them). Media content = `{ file, caption }`, filled by the server from the `files` row. A sublist block creates its child list in the same batch; deleting/restoring the block trashes/restores the tree (`trash_root_id` = block). New routes: `POST /lists/:id/blocks/move-to`, `POST /lists/:id/duplicate`, `GET|PATCH /lists/:id/prefs` (+ `listPrefs` live event); `PATCH /lists/:id` takes `cover`. `GET /lists` now includes sublists (All lists filters roots). Uploads accept any MIME; non-images download as octet-stream attachments.
-- **Web:** `editor/media.ts` (pending uploads store, `insertFiles`, `insertSublist`, `moveBlocksTo`, `focusAtomic`), `MediaBlocks.tsx`, `SublistBlock.tsx`; atomic blocks focus via `[data-atomic]`. `lists/CustomizeList.tsx`, `cover.ts`, `ListViewMenu.tsx`, `list-view.ts` (`viewBlocks`), breadcrumb in ListPage; right panel takes a resolved `PanelCover` (route panel `{ kind: "list" }`). `files/resize.ts` (browser downscale, covers ≤2400px).
-- **Run / verify:** `pnpm infra:up`, `pnpm db:migrate`, `pnpm dev`; in a list try `/sublist`, `/image`, `/attachment`, paste/drop a file, drag a block onto a sublist row or sidebar list, ⋮ → Customize / Duplicate / Print, funnel → Alphabetical. `pnpm check`; `pnpm test:e2e` (media.spec.ts).
-- **Gotchas:** sign-up is rate-limited (10/min/IP): running the whole e2e suite twice in a minute fails sign-ups with a non-OK response — wait a minute. While a block hovers a sublist row the sortable strategy is `holdStill`, otherwise rows shift away from the pointer. Optimistic sublists have `version: 0` (renames send `baseVersion ≥ 1` and wait for the parent store's `flush`). Mark all incomplete, task sorts and Hide completed have no effect until tasks exist.
-- **Next:** M3.1 Task blocks + details panel (add `task` to `BLOCK_TYPES`/CHECK/`SLASH_ITEMS`, `blocks.task_id`; wire Mark all incomplete, Show tasks only/Hide completed in `viewBlocks`, and the sublist row's open-task count).
----`, `/`, Tab, Esc + Shift+↓). `pnpm check`; `pnpm test:e2e` (editor.spec.ts types at full speed, reloads, checks a second window).
-- **Gotchas:** every editor change must go through `ctx.commands.run` (undo) → `store.apply`, never `setQueryData`. A focused Tiptap editor ignores cache updates: commands that change its text call `setText`/`syncEditors`. TanStack notifications run in a microtask (main.tsx) — keep it, Enter→focus depends on it. The built-in browser pane throttles timers when hidden, so automated key bursts there misbehave; trust Playwright. Auth sign-up is rate-limited (10/min/IP): repeated e2e runs hit 429. Playwright's "Desktop Chrome" may not be Apple: use the page's Mod key (`modKey()` in editor.spec.ts).
-- **Next:** M2.3 Media blocks, covers, sublists, list menu (add `image`/`attachment`/`sublist` types to `BLOCK_TYPES`, the DB CHECK and `SLASH_ITEMS`; `file_id`/`sublist_id` columns; `lists.parent_block_id` FK).
+- **Last phase:** M3.1 Task blocks + details panel (done; PR from `phase/M3.1-task-blocks`). D-056–D-062.
+- **State:** migration 0006 adds `tasks`, `activity_events`, `blocks.task_id` (unique; CHECK: set exactly on `task` blocks) and `user_settings.getting_started_seeded_at`. A task block's content is the title (`tasks.title_inline` + plain `title` mirror it); the block DTO carries `taskId` + `task: {completedAt, completedBy}`. Subtasks are task blocks in a task's body (`container_type='task'`); `GET /lists/:id/blocks` returns the list's blocks **plus its tasks' bodies**, and the one batch route edits them all (`task: {id, completed}`, `container` on upsert/move; depth ≤ 4). Deleting a task block trashes its subtree (trash root = block); turning it into text trashes the task, undo restores it. New routes: `GET|PATCH /tasks/:id`, `GET /tasks/:id/activity`; `task` live events. `/me` seeds "Getting started" once (backfill for old accounts) and exposes `soundsEnabled`.
+- **Web:** `editor/tree.ts` (`visibleTree`, `placeNear`, `subtaskProgress`, `ancestorIn`, `withDescendants`) — editors render the visible tree, never the raw cache. Store fields `taskId`/`completed`/`container`; one shared store per list page (`use-block-store.ts`, ref-counted). Task rows reuse the text-row layout (`TaskRow.tsx` marker/trailing) so Turn into keeps the editor mounted. `features/tasks/` (TaskDetails panel = BlockEditor rooted at `{type:"task"}`, ActivityLog). `lists/list-view.ts` filters/sorts with depth; `editor/reopen.ts` (Mark all incomplete); `platform.playCompleteSound`.
+- **Run / verify:** `pnpm infra:up`, `pnpm db:migrate`, `pnpm dev`; in a list type `[] ` + text, Enter, Tab / Shift+Tab, click checkboxes, ⌘/Ctrl+D, ⌘/Ctrl+Enter or the row arrow (details), funnel → Hide completed / sorts, ⋮ → Mark all incomplete. `pnpm check`; `pnpm test:e2e` (tasks.spec.ts).
+- **Gotchas:** new blocks need same-container positions (`placeNear`/`ctx.all()`), not neighbours of visible rows. Live upserts of body blocks find their page by the parent task's block (`pageOf` in store.ts). New accounts start with "Getting started" in Favorites — e2e list assertions filter it out (`SEEDED`). The built-in browser pane's `type`/key actions don't fire real keydowns: verify typing with Playwright. Stop preview dev servers before `pnpm test:e2e` (a reused API keeps the 10/min sign-up limit).
+- **Next:** M3.2 Dates, priority, labels, natural language (add the due/priority/label columns + chips; the panel's chip row and the row's edit icon row are waiting for them).
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -72,11 +69,12 @@ Specs: spec/lists-and-blocks.md
 - Mark all incomplete moved to M3.1: it has nothing to reset until tasks exist (owner's call).
 
 ## M3 — Tasks
-### M3.1 Task blocks + details panel `[ ]`
+### M3.1 Task blocks + details panel `[x]`
 Specs: spec/tasks.md (properties, creating, subtasks), spec/ui-design.md (§4 task row, §5 details panel)
-- [ ] Task block, completion animation + sound, hover affordances; details panel (chips, body editor, subtasks with Tab indent, progress ring); activity log
-- [ ] ⋮ Mark all incomplete (moved from M2.3); make "Show tasks only"/"Hide completed" and the task-field sorts work in `viewBlocks`; open-task count on sublist rows
-- [ ] Seed a "Getting started" list on sign-up (moved from M1.1; spec/settings-and-account.md → Authentication screens), with a backfill for users who signed up before it existed
+- [x] Task block, completion animation + sound, hover affordances; details panel (chips, body editor, subtasks with Tab indent, progress ring); activity log
+- [x] ⋮ Mark all incomplete (moved from M2.3); make "Show tasks only"/"Hide completed" and the task-field sorts work in `viewBlocks`; open-task count on sublist rows
+- [x] Seed a "Getting started" list on sign-up (moved from M1.1; spec/settings-and-account.md → Authentication screens), with a backfill for users who signed up before it existed
+- Left for later phases: the other property chips (M3.2, M7.3), the details ⋮ actions beyond Delete and Copy-as-Markdown with nested subtasks (M3.3), the message composer (M7.3). Mod+D (complete) was pulled in from M3.3 so the checkbox is keyboard-reachable.
 ### M3.2 Dates, priority, labels, natural language `[ ]`
 Specs: spec/tasks.md (NL dates, due dates, labels, priority), spec/ui-design.md §6
 - [ ] Date picker popover; chrono-node wrapper + fixtures; suggestion popover; priority + labels + Settings → Labels
@@ -176,3 +174,9 @@ Done when (M4): a full day of work is possible without the mouse.
 - Show list covers on phones/tablets (a header image), since the right panel only exists on desktop (D-027)
 - Copy files on Duplicate list instead of sharing them, if per-list file deletion ever needs it (D-053)
 - Paste of a copied sublist could re-create the sublist (today it pastes its title, D-051)
+- Shift+Tab on a subtask could carry its later siblings along as its own subtasks (outline behaviour); M3.1 moves only the task (D-059)
+- Paste nested Markdown checklists as subtasks (they paste flat in M3.1, D-061)
+- Trash tasks together with their deleted list, so Today/Inbox (M4) never surface them; M3.1 hides them only through the list's access (D-056)
+- Live-update an open details panel when its task moves to another list (the old page gets block deletes only, D-056)
+- Remember collapsed subtasks per user (M3.1 keeps it in component state)
+- Sublists inside a task's details (lists-and-blocks.md allows it; M3.1 task bodies refuse sublist blocks, D-056)

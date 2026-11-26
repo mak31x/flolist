@@ -9,6 +9,8 @@ import { BlockHandle, type BlockAction } from "./BlockHandle.tsx";
 import { InlineEditor } from "./InlineEditor.tsx";
 import { AttachmentBlock, ImageBlock } from "./MediaBlocks.tsx";
 import { SublistBlock } from "./SublistBlock.tsx";
+import { TaskMarker, TaskTrailing } from "./TaskRow.tsx";
+import { isDone } from "./task-utils.ts";
 
 export interface BlockRowProps {
   block: Block;
@@ -34,10 +36,19 @@ export interface BlockRowProps {
   /** False while the list is shown sorted (drag reorder is off then). */
   draggable?: boolean;
   onAction: (block: Block, action: BlockAction) => void;
+  /** Nesting level (subtasks under their task). */
+  depth?: number | undefined;
+  /** Task rows: direct subtasks done/total. */
+  progress?: { done: number; total: number } | undefined;
+  collapsed?: boolean | undefined;
+  onCollapse?: ((block: Block) => void) | undefined;
+  onComplete?: ((block: Block, completed: boolean) => void) | undefined;
+  onOpenTask?: ((block: Block) => void) | undefined;
 }
 
 /** Text styles per type [assumption: sizes picked to sit between body and page title]. */
 const textClass: Record<string, string> = {
+  task: "text-body",
   paragraph: "text-body",
   heading1: "font-display text-[26px] leading-8 font-bold tracking-[-0.01em]",
   heading2: "font-display text-[21px] leading-7 font-semibold",
@@ -180,7 +191,17 @@ export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
         >
           {numberLabel(props.number ?? 1, block.indent)}
         </span>
+      ) : block.type === "task" ? (
+        <TaskMarker
+          block={block}
+          hasSubtasks={(props.progress?.total ?? 0) > 0}
+          collapsed={props.collapsed ?? false}
+          saved={props.saved}
+          onCollapse={props.onCollapse}
+          onComplete={(b, completed) => props.onComplete?.(b, completed)}
+        />
       ) : null;
+    const task = block.type === "task";
     body = (
       <div
         className={cn(
@@ -194,10 +215,19 @@ export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
           blockId={block.id}
           inline={inline}
           placeholder={
-            props.placeholder ?? (block.type.startsWith("heading") ? typeLabel(block) : undefined)
+            props.placeholder ??
+            (block.type.startsWith("heading")
+              ? typeLabel(block)
+              : task
+                ? t("editor.task.placeholder")
+                : undefined)
           }
           ariaLabel={typeLabel(block)}
-          className={cn("text-text", textClass[block.type])}
+          className={cn(
+            "text-text transition-colors duration-(--motion-fast)",
+            textClass[block.type],
+            task && isDone(block) && "text-text-muted line-through",
+          )}
           onChange={(next) => {
             props.onChange(block, next);
           }}
@@ -209,6 +239,14 @@ export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
           onPaste={(event, editor) => props.onPaste?.(block, event, editor) ?? false}
           onHistory={props.onHistory}
         />
+        {task && (
+          <TaskTrailing
+            block={block}
+            progress={props.progress ?? { done: 0, total: 0 }}
+            saved={props.saved}
+            onOpen={props.onOpenTask}
+          />
+        )}
       </div>
     );
   }
@@ -219,7 +257,8 @@ export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
       data-block-id={block.id}
       data-block-type={block.type}
       data-selected={props.selected || undefined}
-      style={style}
+      data-depth={props.depth || undefined}
+      style={{ ...style, ...(props.depth ? { marginLeft: props.depth * INDENT_PX } : {}) }}
       className={cn(
         "group/block relative rounded-md",
         props.selected && "bg-surface-selected",

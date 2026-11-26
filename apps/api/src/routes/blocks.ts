@@ -1,4 +1,4 @@
-import { blocks, files, lists } from "@flolist/db";
+import { blocks, files, lists, tasks } from "@flolist/db";
 import {
   blockBatchSchema,
   channel,
@@ -8,7 +8,13 @@ import {
   idParamSchema,
   isInlineImage,
   isMediaBlockType,
+  MAX_SUBTASK_DEPTH,
   resolveBlockShape,
+  taskTitleInlineSchema,
+  taskTitleText,
+  type BlockContainer,
+  type InlineNode,
+  type TextContent,
   type BlockFileMeta,
   type MediaContent,
   type BlockBatchResult,
@@ -17,15 +23,23 @@ import {
   type BlockPage,
   type BlockShape,
 } from "@flolist/shared";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { authorize } from "../authz/authorize.ts";
-import { blockDto, type BlockRow } from "../blocks/dto.ts";
+import { blockDtos, type BlockRow } from "../blocks/dto.ts";
 import { ApiException, notFound } from "../lib/errors.ts";
 import { listChannels, listDto } from "../lists/dto.ts";
 import { subtreeIds } from "../lists/tree.ts";
 import { validate } from "../middleware/validate.ts";
 import { runMutation } from "../sync/mutation.ts";
+import {
+  emitTasks,
+  logActivity,
+  patchTask,
+  restoreTaskTree,
+  taskSubtreeIds,
+  trashTaskTree,
+} from "../tasks/service.ts";
 import { dbOf, type AppEnv } from "../types.ts";
 
 const invalid = (message: string, index: number) =>
@@ -50,8 +64,25 @@ const shapeOf = (row: BlockRow) => ({
   content: row.content as BlockContent,
 });
 
+/** Blocks of a list page: the list's own, and the bodies of the tasks that live in it. */
+const inPage = (listId: string) =>
+  or(
+    and(eq(blocks.containerType, "list"), eq(blocks.containerId, listId)),
+    and(
+      eq(blocks.containerType, "task"),
+      inArray(
+        blocks.containerId,
+        sql`(select ${tasks.id} from ${tasks} where ${tasks.listId} = ${listId} and ${tasks.deletedAt} is null)`,
+      ),
+    ),
+  );
+
 export const blockRoutes = new Hono<AppEnv>()
-  /** The list's live blocks in order (D-007). Sublists (M2.3) are their own containers. */
+  /**
+   * The list's live blocks in order (D-007), plus the bodies of its tasks (subtasks render
+   * nested, and the details panel edits a body with the same store). Sublists (M2.3) are their
+   * own pages.
+   */
   .get("/:id/blocks", validate("param", idParamSchema), async (c) => {
     const { id } = c.req.valid("param");
     const db = dbOf(c);
@@ -59,11 +90,9 @@ export const blockRoutes = new Hono<AppEnv>()
     const rows = await db
       .select()
       .from(blocks)
-      .where(
-        and(eq(blocks.containerType, "list"), eq(blocks.containerId, id), isNull(blocks.deletedAt)),
-      )
+      .where(and(inPage(id), isNull(blocks.deletedAt)))
       .orderBy(asc(blocks.position), asc(blocks.id));
-    const body: BlockPage = { items: rows.map(blockDto) };
+    const body: BlockPage = { items: await blockDtos(db, rows) };
     return c.json(body);
   })
 
@@ -97,13 +126,59 @@ export const blockRoutes = new Hono<AppEnv>()
           .for("update")) {
           existing.set(row.id, row);
         }
-        const inThisList = (row: BlockRow | undefined): row is BlockRow =>
-          row !== undefined && row.containerType === "list" && row.containerId === listId;
 
-        const changed: BlockRow[] = [];
+        // The tasks whose bodies belong to this page (their home list is this list).
+        const pageTasks = new Map<string, { parentTaskId: string | null; live: boolean }>();
+        for (const t of await tx
+          .select({ id: tasks.id, parentTaskId: tasks.parentTaskId, deletedAt: tasks.deletedAt })
+          .from(tasks)
+          .where(eq(tasks.listId, listId))) {
+          pageTasks.set(t.id, { parentTaskId: t.parentTaskId, live: t.deletedAt === null });
+        }
+        const inThisPage = (row: BlockRow | undefined): row is BlockRow =>
+          row !== undefined &&
+          (row.containerType === "list"
+            ? row.containerId === listId
+            : pageTasks.has(row.containerId));
+
+        /** Top-level tasks are depth 1, their subtasks 2, … */
+        const depthOf = (taskId: string) => {
+          let depth = 0;
+          for (let cur: string | null = taskId; cur && depth <= MAX_SUBTASK_DEPTH; depth++) {
+            cur = pageTasks.get(cur)?.parentTaskId ?? null;
+          }
+          return depth;
+        };
+        /** Levels in a task's tree, the task itself included. */
+        const heightOf = (taskId: string): number => {
+          let max = 0;
+          for (const [child, t] of pageTasks) {
+            if (t.parentTaskId === taskId && t.live) max = Math.max(max, heightOf(child));
+          }
+          return max + 1;
+        };
+
+        const changed = new Map<string, BlockRow>();
         const deleted: string[] = [];
+        const touchedTasks = new Set<string>();
         const now = new Date();
         const listChannelsOfRoot = listChannels(root);
+
+        function containerOf(index: number, container: BlockContainer | undefined) {
+          if (!container || (container.type === "list" && container.id === listId)) {
+            return { type: "list" as const, id: listId };
+          }
+          if (container.type === "task" && pageTasks.get(container.id)?.live) {
+            return { type: "task" as const, id: container.id };
+          }
+          throw invalid("The container isn't a task in this list", index);
+        }
+
+        function titleOf(index: number, content: BlockContent): InlineNode[] {
+          const parsed = taskTitleInlineSchema.safeParse((content as TextContent).inline);
+          if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "Bad title", index);
+          return parsed.data;
+        }
 
         async function fileMeta(index: number, fileId: string, image: boolean) {
           const [file] = await tx.select().from(files).where(eq(files.id, fileId));
@@ -160,17 +235,139 @@ export const blockRoutes = new Hono<AppEnv>()
           }
         }
 
+        /** A task tree went to Trash or came back: track its body blocks and tasks. */
+        function noteBodies(rows: BlockRow[], trashed: boolean) {
+          for (const row of rows) {
+            existing.set(row.id, row);
+            if (trashed) {
+              changed.delete(row.id);
+              deleted.push(row.id);
+            } else {
+              changed.set(row.id, row);
+            }
+            if (row.taskId) touchedTasks.add(row.taskId);
+          }
+        }
+
+        async function refreshPageTasks() {
+          for (const t of await tx
+            .select({ id: tasks.id, parentTaskId: tasks.parentTaskId, deletedAt: tasks.deletedAt })
+            .from(tasks)
+            .where(eq(tasks.listId, listId))) {
+            pageTasks.set(t.id, { parentTaskId: t.parentTaskId, live: t.deletedAt === null });
+          }
+        }
+
+        async function trashTask(taskId: string, trashRootId: string) {
+          touchedTasks.add(taskId);
+          noteBodies(await trashTaskTree(tx, taskId, trashRootId, user.id, now), true);
+          await refreshPageTasks();
+        }
+
+        async function restoreTask(taskId: string, trashRootId: string) {
+          touchedTasks.add(taskId);
+          noteBodies(await restoreTaskTree(tx, trashRootId), false);
+          await refreshPageTasks();
+          const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId));
+          if (task) await logActivity(tx, { task, actorId: user.id, action: "restored", now });
+        }
+
+        async function createTask(
+          index: number,
+          taskId: string,
+          container: BlockContainer,
+          inline: InlineNode[],
+          completed: boolean,
+        ) {
+          const parentTaskId = container.type === "task" ? container.id : null;
+          if (parentTaskId && depthOf(parentTaskId) + 1 > MAX_SUBTASK_DEPTH) {
+            throw invalid("Subtasks can't nest any deeper", index);
+          }
+          const title = taskTitleText(inline);
+          const [task] = await tx
+            .insert(tasks)
+            .values({
+              id: taskId,
+              workspaceId: root.workspaceId,
+              rootListId: root.id,
+              listId,
+              parentTaskId,
+              title,
+              titleInline: inline,
+              ...(completed ? { completedAt: now, completedBy: user.id } : {}),
+              createdBy: user.id,
+            })
+            .onConflictDoNothing()
+            .returning();
+          if (!task) throw new ApiException("CONFLICT", "A task with this id already exists");
+          pageTasks.set(task.id, { parentTaskId, live: true });
+          touchedTasks.add(task.id);
+          await logActivity(tx, { task, actorId: user.id, action: "created", new: title, now });
+        }
+
+        /** The block's new container (Tab / Shift+Tab, drags between containers). */
+        async function containerPatch(
+          index: number,
+          row: BlockRow,
+          container: BlockContainer,
+        ): Promise<Partial<typeof blocks.$inferInsert>> {
+          if (container.type === row.containerType && container.id === row.containerId) return {};
+          const target = containerOf(index, container);
+          if (target.type === "task" && row.type === "sublist") {
+            throw invalid("A task can't hold a sublist", index);
+          }
+          if (row.taskId) {
+            if (target.type === "task") {
+              for (let cur: string | null = target.id; cur;) {
+                if (cur === row.taskId) throw invalid("A task can't go inside itself", index);
+                cur = pageTasks.get(cur)?.parentTaskId ?? null;
+              }
+              if (depthOf(target.id) + heightOf(row.taskId) > MAX_SUBTASK_DEPTH) {
+                throw invalid("Subtasks can't nest any deeper", index);
+              }
+            }
+            const parentTaskId = target.type === "task" ? target.id : null;
+            await tx
+              .update(tasks)
+              .set({ parentTaskId, version: sql`${tasks.version} + 1` })
+              .where(eq(tasks.id, row.taskId));
+            pageTasks.set(row.taskId, { parentTaskId, live: true });
+            touchedTasks.add(row.taskId);
+          }
+          return { containerType: target.type, containerId: target.id };
+        }
+
+        /** Title and completion of a task block's task. */
+        async function updateTask(
+          index: number,
+          taskId: string,
+          content: BlockContent | undefined,
+          completed: boolean | undefined,
+        ) {
+          const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for("update");
+          if (!task) throw new Error(`task ${taskId} missing`);
+          const inline = content ? titleOf(index, content) : undefined;
+          if (await patchTask(tx, task, { inline, completed }, user.id, now)) {
+            touchedTasks.add(taskId);
+          }
+        }
+
         for (const [index, op] of input.ops.entries()) {
           const row = existing.get(op.id);
-          if (row && !inThisList(row)) {
+          if (row && !inThisPage(row)) {
             // Ids are client-made UUIDv7s; a clash with another container is never legitimate.
             throw op.op === "upsert"
               ? new ApiException("CONFLICT", "A block with this id already exists")
               : notFound("Block");
           }
           const result = await applyOp(index, op, row);
-          if (result === "deleted") deleted.push(op.id);
-          else if (result) changed.push(result);
+          if (result === "deleted") {
+            changed.delete(op.id);
+            deleted.push(op.id);
+          } else if (result) {
+            existing.set(result.id, result);
+            changed.set(result.id, result);
+          }
         }
 
         async function applyOp(
@@ -192,24 +389,27 @@ export const blockRoutes = new Hono<AppEnv>()
                 .where(eq(blocks.id, row.id))
                 .returning();
               if (!gone) throw new Error(`block ${row.id} vanished during delete`);
+              existing.set(gone.id, gone);
               await setSublistTrash(gone, true);
-              await emit([channel.list(root.id)], {
-                op: "delete",
-                entity: "block",
-                id: gone.id,
-                version: gone.version,
-              });
+              if (gone.taskId) await trashTask(gone.taskId, gone.id);
               return "deleted";
             }
             case "move": {
               if (!row || row.deletedAt) throw notFound("Block");
               const shape = resolveShape(index, shapeOf(row), { indent: op.indent });
-              return update(row.id, { position: op.position, indent: shape.indent });
+              const patch: Partial<typeof blocks.$inferInsert> = {
+                position: op.position,
+                indent: shape.indent,
+              };
+              if (op.container)
+                Object.assign(patch, await containerPatch(index, row, op.container));
+              return update(row.id, patch);
             }
             case "upsert": {
               if (!row) {
                 if (!op.position) throw invalid("A new block needs a type and a position", index);
                 const shape = resolveShape(index, null, op);
+                const container = containerOf(index, op.container);
                 const media = isMediaBlockType(shape.type);
                 if (media !== (op.fileId !== undefined)) {
                   throw invalid(
@@ -224,6 +424,16 @@ export const blockRoutes = new Hono<AppEnv>()
                       : "A sublist block needs a list",
                     index,
                   );
+                }
+                if (shape.type === "sublist" && container.type === "task") {
+                  throw invalid("A task can't hold a sublist", index);
+                }
+                const taskId = shape.type === "task" ? op.task?.id : undefined;
+                if (shape.type === "task" && !taskId) {
+                  throw invalid("A new task block needs a task id", index);
+                }
+                if (shape.type !== "task" && op.task) {
+                  throw invalid("Only task blocks take a task", index);
                 }
                 if (op.fileId) {
                   shape.content = {
@@ -249,17 +459,27 @@ export const blockRoutes = new Hono<AppEnv>()
                     throw new ApiException("CONFLICT", "A list with this id already exists");
                   }
                 }
+                if (taskId) {
+                  await createTask(
+                    index,
+                    taskId,
+                    container,
+                    titleOf(index, shape.content),
+                    op.task?.completed ?? false,
+                  );
+                }
                 const [created] = await tx
                   .insert(blocks)
                   .values({
                     id: op.id,
-                    containerType: "list",
-                    containerId: listId,
+                    containerType: container.type,
+                    containerId: container.id,
                     rootListId: root.id,
                     position: op.position,
                     ...shape,
                     fileId: op.fileId ?? null,
                     sublistId: sublist?.id ?? null,
+                    taskId: taskId ?? null,
                     createdBy: user.id,
                   })
                   .onConflictDoNothing()
@@ -292,6 +512,12 @@ export const blockRoutes = new Hono<AppEnv>()
               if (op.fileId && !isMediaBlockType(shape.type)) {
                 throw invalid("Only media blocks take a file", index);
               }
+              if (op.task && shape.type !== "task") {
+                throw invalid("Only task blocks take a task", index);
+              }
+              if (row.taskId && op.task?.id && op.task.id !== row.taskId) {
+                throw invalid("A block's task can't change", index);
+              }
               const fileId = op.fileId ?? row.fileId;
               if (isMediaBlockType(shape.type)) {
                 // The file's details always come from the file row, never from the client.
@@ -307,9 +533,51 @@ export const blockRoutes = new Hono<AppEnv>()
                 };
               }
               const restored = row.deletedAt !== null;
+              if (restored) {
+                // Restore first: the block's own row comes back below, its tree here.
+                if (row.taskId) await restoreTask(row.taskId, row.id);
+              }
+
+              let taskId = row.taskId;
+              if (row.taskId && shape.type !== "task") {
+                // Turned into text: the task (and its body) goes to Trash with this block as
+                // its root, so turning it back into a task (undo) restores it.
+                await trashTask(row.taskId, row.id);
+                taskId = null;
+              } else if (!row.taskId && shape.type === "task") {
+                const id = op.task?.id;
+                if (!id) throw invalid("A block turned into a task needs a task id", index);
+                const [prior] = await tx.select().from(tasks).where(eq(tasks.id, id));
+                if (prior && prior.trashRootId === row.id && prior.deletedAt) {
+                  await restoreTask(id, row.id);
+                } else if (prior) {
+                  throw new ApiException("CONFLICT", "A task with this id already exists");
+                } else {
+                  await createTask(
+                    index,
+                    id,
+                    { type: row.containerType, id: row.containerId },
+                    titleOf(index, shape.content),
+                    op.task?.completed ?? false,
+                  );
+                }
+                taskId = id;
+              }
+              if (taskId && shape.type === "task") {
+                await updateTask(
+                  index,
+                  taskId,
+                  op.content || op.type ? shape.content : undefined,
+                  op.task?.completed,
+                );
+              }
+
+              const moved = op.container ? await containerPatch(index, row, op.container) : {};
               const updated = await update(row.id, {
                 ...shape,
+                ...moved,
                 fileId,
+                taskId,
                 ...(op.position ? { position: op.position } : {}),
                 ...(restored ? { deletedAt: null, deletedBy: null, trashRootId: null } : {}),
               });
@@ -329,16 +597,28 @@ export const blockRoutes = new Hono<AppEnv>()
           return updated;
         }
 
-        for (const row of changed) {
+        for (const id of deleted) {
+          const row = existing.get(id);
+          if (!row) continue;
+          await emit([channel.list(root.id)], {
+            op: "delete",
+            entity: "block",
+            id,
+            version: row.version,
+          });
+        }
+        const dtos = await blockDtos(tx, [...changed.values()]);
+        for (const dto of dtos) {
           await emit([channel.list(root.id)], {
             op: "upsert",
             entity: "block",
-            id: row.id,
-            version: row.version,
-            data: blockDto(row),
+            id: dto.id,
+            version: dto.version,
+            data: dto,
           });
         }
-        const body: BlockBatchResult = { blocks: changed.map(blockDto), deleted };
+        await emitTasks(tx, emit, touchedTasks);
+        const body: BlockBatchResult = { blocks: dtos, deleted: [...new Set(deleted)] };
         return { status: 200, body };
       });
     },
@@ -427,6 +707,37 @@ export const blockRoutes = new Hono<AppEnv>()
           moved.push(updated);
         }
 
+        // Tasks follow: the moved tasks and their subtasks get the target as home list, and
+        // their bodies move to the target's root.
+        const movedTasks: string[] = [];
+        for (const row of rows) {
+          if (row.taskId) movedTasks.push(...(await taskSubtreeIds(tx, row.taskId)));
+        }
+        const bodies: BlockRow[] = [];
+        if (movedTasks.length > 0) {
+          await tx
+            .update(tasks)
+            .set({
+              listId: target.list.id,
+              rootListId: target.root.id,
+              version: sql`${tasks.version} + 1`,
+            })
+            .where(inArray(tasks.id, movedTasks));
+          bodies.push(
+            ...(await tx
+              .update(blocks)
+              .set({ rootListId: target.root.id, version: sql`${blocks.version} + 1` })
+              .where(
+                and(
+                  eq(blocks.containerType, "task"),
+                  inArray(blocks.containerId, movedTasks),
+                  isNull(blocks.deletedAt),
+                ),
+              )
+              .returning()),
+          );
+        }
+
         // Child lists follow: direct children hang under the target, all move to its root.
         if (movedLists.length > 0) {
           const direct = new Set(rows.map((r) => r.sublistId).filter((x) => x !== null));
@@ -445,6 +756,27 @@ export const blockRoutes = new Hono<AppEnv>()
             .update(blocks)
             .set({ rootListId: target.root.id })
             .where(and(eq(blocks.containerType, "list"), inArray(blocks.containerId, movedLists)));
+          // Tasks of the moved sublists keep their home list; only the root changes.
+          const sublistTasks = await tx
+            .update(tasks)
+            .set({ rootListId: target.root.id, version: sql`${tasks.version} + 1` })
+            .where(inArray(tasks.listId, movedLists))
+            .returning({ id: tasks.id });
+          if (sublistTasks.length > 0) {
+            await tx
+              .update(blocks)
+              .set({ rootListId: target.root.id })
+              .where(
+                and(
+                  eq(blocks.containerType, "task"),
+                  inArray(
+                    blocks.containerId,
+                    sublistTasks.map((t) => t.id),
+                  ),
+                ),
+              );
+            movedTasks.push(...sublistTasks.map((t) => t.id));
+          }
           const updatedLists = await tx.select().from(lists).where(inArray(lists.id, movedLists));
           for (const l of updatedLists) {
             await emit(listChannels(target.root), {
@@ -458,7 +790,7 @@ export const blockRoutes = new Hono<AppEnv>()
         }
 
         // Deletes first, so caches of the source list drop the rows the upserts re-add elsewhere.
-        for (const row of moved) {
+        for (const row of [...moved, ...bodies]) {
           await emit([channel.list(source.root.id)], {
             op: "delete",
             entity: "block",
@@ -466,16 +798,18 @@ export const blockRoutes = new Hono<AppEnv>()
             version: row.version,
           });
         }
-        for (const row of moved) {
+        const dtos = await blockDtos(tx, [...moved, ...bodies]);
+        for (const dto of dtos) {
           await emit([channel.list(target.root.id)], {
             op: "upsert",
             entity: "block",
-            id: row.id,
-            version: row.version,
-            data: blockDto(row),
+            id: dto.id,
+            version: dto.version,
+            data: dto,
           });
         }
-        const body: BlockBatchResult = { blocks: moved.map(blockDto), deleted: [] };
+        await emitTasks(tx, emit, movedTasks);
+        const body: BlockBatchResult = { blocks: dtos, deleted: [] };
         return { status: 200, body };
       });
     },

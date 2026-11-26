@@ -26,6 +26,8 @@ export interface BlockDraft {
   fileId?: string | undefined;
   /** Sublist blocks: the child list's title (a paste turns it into text). */
   title?: string | undefined;
+  /** Task blocks: done or not (a paste makes new tasks in that state). */
+  completed?: boolean | undefined;
 }
 
 /** Same-origin URL of a file (mirrors `fileUrl` in files.ts, kept local to avoid a cycle). */
@@ -158,7 +160,7 @@ export function blocksToMarkdown(blocks: readonly BlockDraft[]): string {
   let out = "";
   let prevList = false;
   withIds.forEach((block, i) => {
-    const list = isIndentable(block.type);
+    const list = isIndentable(block.type) || block.type === "task";
     if (i > 0) out += list && prevList ? "\n" : "\n\n";
     prevList = list;
     if (block.type === "divider") {
@@ -196,6 +198,13 @@ export function blocksToMarkdown(blocks: readonly BlockDraft[]): string {
       case "quote":
         out += lines.map((l) => `> ${l}`.trimEnd()).join("\n");
         return;
+      case "task": {
+        // A GitHub-style checklist item; hard breaks continue under the text.
+        const marker = block.completed ? "- [x] " : "- [ ] ";
+        out += `${marker}${first}`.trimEnd();
+        for (const line of rest) out += `\n${" ".repeat(marker.length)}${line}`;
+        return;
+      }
       case "bullet":
       case "numbered": {
         const marker = block.type === "bullet" ? "- " : `${String(numbers.get(block.id) ?? 1)}. `;
@@ -264,6 +273,7 @@ export function blocksToHtml(blocks: readonly BlockDraft[]): string {
       } else if (block.type === "sublist") out += `<p>${escapeHtml(block.title ?? "")}</p>`;
       else if (block.type === "quote") out += `<blockquote><p>${inline}</p></blockquote>`;
       else if (block.type === "paragraph") out += `<p>${inline}</p>`;
+      else if (block.type === "task") out += `<p>${block.completed ? "☑" : "☐"} ${inline}</p>`;
       else out += `<h${block.type.slice(-1)}>${inline}</h${block.type.slice(-1)}>`;
       continue;
     }
@@ -485,8 +495,9 @@ function textDraft(type: BlockType, text: string, indent = 0): BlockDraft {
 /**
  * Markdown → blocks. Handles ATX headings (H4–H6 become H3), lists (indent levels from a
  * stack of leading widths, so 2- and 4-space nesting both work), block quotes, thematic
- * breaks, fenced code (kept as code-marked paragraphs) and paragraphs. Checklist markers
- * (`- [ ]`) are dropped until tasks exist (M3.1) `[assumption]`.
+ * breaks, fenced code (kept as code-marked paragraphs) and paragraphs. Checklist items
+ * (`- [ ]`, `- [x]`) become tasks; nested ones come in flat `[assumption]` (subtasks need a
+ * parent task, which a paste doesn't create).
  */
 export function markdownToBlocks(markdown: string): BlockDraft[] {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n").map(expandTabs);
@@ -586,9 +597,17 @@ export function markdownToBlocks(markdown: string): BlockDraft[] {
       while (listStack.length > 0 && width < (listStack.at(-1) as number)) listStack.pop();
       if (listStack.length === 0 || width > (listStack.at(-1) as number)) listStack.push(width);
       const indent = Math.min(MAX_INDENT, listStack.length - 1);
-      const type: BlockType = /\d/.test(item[2] as string) ? "numbered" : "bullet";
-      const text = (item[3] ?? "").replace(TASK_MARKER, "");
-      const draft: BlockDraft = { type, indent, content: { inline: [] } };
+      const raw = item[3] ?? "";
+      const checklist = TASK_MARKER.exec(raw);
+      const type: BlockType = checklist
+        ? "task"
+        : /\d/.test(item[2] as string)
+          ? "numbered"
+          : "bullet";
+      const text = raw.replace(TASK_MARKER, "");
+      const draft: BlockDraft = checklist
+        ? { type, indent: 0, content: { inline: [] }, completed: /x/i.test(checklist[0]) }
+        : { type, indent, content: { inline: [] } };
       blocks.push(draft);
       lastListItem = { lines: [text], draft };
       continue;

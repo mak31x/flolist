@@ -1,11 +1,6 @@
 import {
   IconButton,
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuTrigger,
   SheetContent,
-  SkeletonSquiggle,
   duration,
   easing,
   panelSlideOffset,
@@ -14,7 +9,9 @@ import {
 } from "@flolist/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
-import { Copy, Link2, MoreVertical, PanelRightClose, Settings2, Trash2, X } from "lucide-react";
+import { PanelRightClose, Settings2 } from "lucide-react";
+import { TaskDetails } from "../features/tasks/TaskDetails.tsx";
+import { t } from "../i18n/index.ts";
 import type { CoverId } from "./covers.ts";
 import { useMediaQuery } from "./use-media-query.ts";
 import { useShell } from "./ui-store.ts";
@@ -51,7 +48,7 @@ export function RightPanel({ cover, task }: RightPanelProps) {
 
   return (
     <aside
-      aria-label={task ? "Task details" : "Cover"}
+      aria-label={task ? t("tasks.details.label") : "Cover"}
       className="relative w-[clamp(300px,30vw,440px)] shrink-0 overflow-hidden rounded-card print:hidden"
     >
       <AnimatePresence initial={false} mode="popLayout">
@@ -101,43 +98,6 @@ export function RightPanel({ cover, task }: RightPanelProps) {
   );
 }
 
-function TaskDetails({ task }: { task: { listId: string; taskId: string } }) {
-  const navigate = useNavigate();
-  const close = () => {
-    void navigate({ to: "/lists/$listId", params: { listId: task.listId } });
-  };
-  return (
-    <div
-      className="flex h-full flex-col p-4"
-      onKeyDown={(e) => {
-        if (e.key === "Escape") close();
-      }}
-    >
-      <div className="flex items-center justify-between">
-        <IconButton label="Close" icon={<X />} variant="chip" shortcut="Escape" onClick={close} />
-        <Menu>
-          <MenuTrigger asChild>
-            <IconButton label="More" icon={<MoreVertical />} variant="chip" tooltip={false} />
-          </MenuTrigger>
-          <MenuContent align="end">
-            <MenuItem icon={<Copy />} disabled>
-              Duplicate
-            </MenuItem>
-            <MenuItem icon={<Link2 />} disabled>
-              Copy link
-            </MenuItem>
-            <MenuItem icon={<Trash2 />} destructive disabled>
-              Delete
-            </MenuItem>
-          </MenuContent>
-        </Menu>
-      </div>
-      <h2 className="mt-5 px-1 text-details-title font-bold">Task</h2>
-      <SkeletonSquiggle className="mt-4" rows={4} />
-    </div>
-  );
-}
-
 function DetailsSheet({ task }: { task: { listId: string; taskId: string } }) {
   const navigate = useNavigate();
   return (
@@ -147,7 +107,7 @@ function DetailsSheet({ task }: { task: { listId: string; taskId: string } }) {
         if (!open) void navigate({ to: "/lists/$listId", params: { listId: task.listId } });
       }}
     >
-      <SheetContent side="right" title="Task details">
+      <SheetContent side="right" title={t("tasks.details.label")}>
         <TaskDetails task={task} />
       </SheetContent>
     </Dialog>

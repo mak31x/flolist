@@ -5,6 +5,7 @@ import {
   type Block,
   type BlockBatch,
   type BlockBatchResult,
+  type BlockContainer,
   type BlockOp,
   type ChangeEvent,
 } from "@flolist/shared";
@@ -15,11 +16,13 @@ import { removeBlock, sortBlocks, upsertBlock } from "./cache.ts";
 
 /**
  * The editable fields of a block. `fileId` belongs to media blocks; `sublistId` is set once,
- * when a sublist block is created (the server creates the child list with it).
+ * when a sublist block is created (the server creates the child list with it). Task blocks have
+ * `taskId` (made here when a block becomes a task) and `completed`; `container` puts a block in
+ * a task's body (subtasks) or back in the list.
  */
 export type BlockFields = Partial<
-  Pick<Block, "type" | "position" | "indent" | "content" | "fileId" | "sublistId">
->;
+  Pick<Block, "type" | "position" | "indent" | "content" | "fileId" | "sublistId" | "taskId">
+> & { completed?: boolean; container?: BlockContainer };
 
 /** One local change. Moves are upserts of `position`/`indent`. */
 export type LocalOp =
@@ -46,29 +49,103 @@ export interface BlockStoreOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const SHAPE_KEYS = ["type", "position", "indent", "content", "fileId"] as const;
+/** Fields an undo step restores (and that a local change lays over a server row). */
+const UNDO_KEYS = [
+  "type",
+  "position",
+  "indent",
+  "content",
+  "fileId",
+  "taskId",
+  "completed",
+  "container",
+] as const;
 /** `keepalive` requests are capped at 64 KB by browsers. */
 const KEEPALIVE_LIMIT = 60_000;
 
+const containerOf = (b: Block): BlockContainer => ({ type: b.containerType, id: b.containerId });
+
+/** Every field of a block, as `apply` takes them. */
 const fullFields = (b: Block): BlockFields => ({
   type: b.type,
   position: b.position,
   indent: b.indent,
   content: b.content,
+  ...(b.containerType === "task" ? { container: containerOf(b) } : {}),
   ...(b.fileId ? { fileId: b.fileId } : {}),
   ...(b.sublistId ? { sublistId: b.sublistId } : {}),
+  ...(b.taskId ? { taskId: b.taskId } : {}),
+  ...(b.task ? { completed: b.task.completedAt !== null } : {}),
 });
 
-/** A queued upsert as the batch API takes it (`sublistId` → `sublist`). */
+/** One field's value on a block (undefined when it doesn't apply). */
+function fieldOf(b: Block, key: (typeof UNDO_KEYS)[number]): unknown {
+  if (key === "container") return containerOf(b);
+  if (key === "completed") return b.task ? b.task.completedAt !== null : undefined;
+  if (key === "taskId" || key === "fileId") return b[key] ?? undefined;
+  return b[key];
+}
+
+/**
+ * `fields` laid over `base` (a cached or server row): the shape rule, then position,
+ * container, file and task. Throws when the result isn't a valid block.
+ */
+function overlay(
+  base: Block,
+  fields: BlockFields,
+  userId: string | null,
+  now: string,
+  fresh = false,
+): Block {
+  // A new block's shape comes from the fields alone (the base is only a template).
+  const result = resolveBlockShape(fresh ? null : base, fields);
+  if (!result.ok) throw new Error(result.error);
+  const isTask = result.shape.type === "task";
+  const taskId = isTask ? (fields.taskId ?? base.taskId) : null;
+  if (isTask && !taskId) throw new Error("A task block needs a task id");
+  const completed = fields.completed ?? (base.task ? base.task.completedAt !== null : false);
+  const unchanged = base.task && fields.completed === undefined ? base.task : null;
+  return {
+    ...base,
+    ...result.shape,
+    position: fields.position ?? base.position,
+    containerType: fields.container?.type ?? base.containerType,
+    containerId: fields.container?.id ?? base.containerId,
+    fileId: fields.fileId ?? base.fileId,
+    taskId,
+    task: isTask
+      ? (unchanged ?? {
+          completedAt: completed ? now : null,
+          completedBy: completed ? userId : null,
+        })
+      : null,
+  };
+}
+
+/** A queued upsert as the batch API takes it (`sublistId` → `sublist`, task fields → `task`). */
 function upsertOp(id: string, fields: BlockFields): BlockOp {
-  const { sublistId, fileId, ...rest } = fields;
+  const { sublistId, fileId, taskId, completed, ...rest } = fields;
+  const task = {
+    ...(taskId ? { id: taskId } : {}),
+    ...(completed !== undefined ? { completed } : {}),
+  };
   return {
     op: "upsert",
     id,
     ...rest,
     ...(fileId ? { fileId } : {}),
     ...(sublistId ? { sublist: { id: sublistId, title: "" } } : {}),
+    ...(Object.keys(task).length > 0 ? { task } : {}),
   };
+}
+
+/** `overlay`, or the base unchanged when the local fields no longer fit it. */
+function tryOverlay(base: Block, fields: BlockFields, userId: string | null): Block {
+  try {
+    return overlay(base, fields, userId, new Date().toISOString());
+  } catch {
+    return base;
+  }
 }
 
 const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
@@ -168,30 +245,38 @@ export class BlockStore {
         queued.set(op.id, { op: "delete" });
         continue;
       }
-      const result = resolveBlockShape(prev ?? null, op.fields);
-      const position = op.fields.position ?? prev?.position;
-      if (!result.ok) throw new Error(result.error);
-      if (!position) throw new Error("A new block needs a type and a position");
-      const next: Block = prev
-        ? { ...prev, ...result.shape, position, fileId: op.fields.fileId ?? prev.fileId }
-        : {
-            id: op.id,
-            containerType: "list",
-            containerId: this.listId,
-            rootListId: this.rootListId,
-            ...result.shape,
-            position,
-            fileId: op.fields.fileId ?? null,
-            sublistId: op.fields.sublistId ?? null,
-            createdBy: this.userId,
-            version: 0,
-            createdAt: now,
-            updatedAt: now,
-          };
+      const fields: BlockFields = { ...op.fields };
+      const type = fields.type ?? prev?.type;
+      // A block that becomes a task gets its task id here (undo hands the same one back).
+      if (type === "task" && !fields.taskId && !prev?.taskId) fields.taskId = uuidv7();
+      const position = fields.position ?? prev?.position;
+      if (!type || !position) throw new Error("A new block needs a type and a position");
+      const base: Block = prev ?? {
+        id: op.id,
+        containerType: "list",
+        containerId: this.listId,
+        rootListId: this.rootListId,
+        type,
+        position,
+        indent: 0,
+        content: {},
+        fileId: null,
+        sublistId: fields.sublistId ?? null,
+        taskId: null,
+        task: null,
+        createdBy: this.userId,
+        version: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const next = overlay(base, fields, this.userId, now, !prev);
       if (prev) {
         const undo: BlockFields = {};
-        for (const key of SHAPE_KEYS) {
-          if (!same(prev[key], next[key])) Object.assign(undo, { [key]: prev[key] });
+        for (const key of UNDO_KEYS) {
+          const before = fieldOf(prev, key);
+          if (!same(before, fieldOf(next, key)) && before !== undefined) {
+            Object.assign(undo, { [key]: before });
+          }
         }
         if (Object.keys(undo).length === 0) continue;
         inverse.unshift({ op: "upsert", id: op.id, fields: undo });
@@ -201,15 +286,15 @@ export class BlockStore {
       rows = upsertBlock(rows, next);
       const q = queued.get(op.id);
       const full = !prev || q?.op === "delete" || (q?.op === "upsert" && q.full);
-      const fields: BlockFields =
-        q?.op === "upsert" ? { ...q.fields, ...op.fields } : { ...op.fields };
+      const merged: BlockFields = q?.op === "upsert" ? { ...q.fields, ...fields } : fields;
       // A type change can reset content and indent (and merging may have kept an older
       // content); send the resolved values so the server applies exactly what we show.
-      if (fields.type !== undefined) {
-        fields.content = next.content;
-        fields.indent = next.indent;
+      if (merged.type !== undefined) {
+        merged.content = next.content;
+        merged.indent = next.indent;
+        if (next.taskId) merged.taskId = next.taskId;
       }
-      queued.set(op.id, { op: "upsert", full, fields });
+      queued.set(op.id, { op: "upsert", full, fields: merged });
     }
 
     this.queued = queued;
@@ -225,25 +310,20 @@ export class BlockStore {
     if (this.queued.size === 0) return;
 
     const ops: BlockOp[] = [];
+    const inflight = new Map<string, Queued>();
     for (const [id, q] of this.queued) {
       if (q.op === "delete") {
         ops.push({ op: "delete", id });
+        inflight.set(id, q);
         continue;
       }
       const row = this.get(id);
       const fields = q.full ? (row ? fullFields(row) : null) : q.fields;
-      if (fields) ops.push(upsertOp(id, fields));
+      if (!fields) continue;
+      ops.push(upsertOp(id, fields));
+      inflight.set(id, { op: "upsert", fields, full: false });
     }
-    this.inflightOps = new Map(
-      ops.map((o): [string, Queued] => {
-        if (o.op !== "upsert") return [o.id, { op: "delete" }];
-        const fields: BlockFields = {};
-        for (const key of SHAPE_KEYS) {
-          if (o[key] !== undefined) Object.assign(fields, { [key]: o[key] });
-        }
-        return [o.id, { op: "upsert", fields, full: false }];
-      }),
-    );
+    this.inflightOps = inflight;
     this.queued = new Map();
 
     this.inflight = (async () => {
@@ -269,10 +349,7 @@ export class BlockStore {
     let next = server;
     if (q?.op === "upsert") {
       const local = q.full && current ? fullFields(current) : q.fields;
-      const merged = resolveBlockShape(server, local);
-      next = merged.ok
-        ? { ...server, ...merged.shape, position: local.position ?? server.position }
-        : server;
+      next = tryOverlay(server, local, this.userId);
     }
     this.qc.setQueryData<Block[]>(blocksKey(this.listId), upsertBlock(rows, next));
   }
@@ -300,9 +377,7 @@ export class BlockStore {
         const base = out.get(id) ?? mine;
         if (!base) continue;
         const fields = q.full && mine ? fullFields(mine) : q.fields;
-        const merged = resolveBlockShape(base, fields);
-        if (merged.ok)
-          out.set(id, { ...base, ...merged.shape, position: fields.position ?? base.position });
+        out.set(id, tryOverlay(base, fields, this.userId));
       }
     }
     return sortBlocks([...out.values()]);
@@ -384,9 +459,24 @@ export function registerBlockStore(store: BlockStore): () => void {
 export type BlockChangeEvent = ChangeEvent & { entity: "block" };
 
 /** Applies a live block event (called from `applyChange`). */
+/**
+ * The list page whose cache holds `block`: its list, or for a task body the page that holds
+ * the task's block (or the block itself, before a move). Null when no open page has it.
+ */
+function pageOf(qc: QueryClient, block: Block): string | null {
+  if (block.containerType === "list") return block.containerId;
+  for (const [key, rows] of qc.getQueriesData<Block[]>({ queryKey: ["blocks"] })) {
+    const listId = key[1];
+    if (typeof listId !== "string" || !rows) continue;
+    if (rows.some((b) => b.taskId === block.containerId || b.id === block.id)) return listId;
+  }
+  return null;
+}
+
 export function applyBlockChange(qc: QueryClient, event: BlockChangeEvent): void {
   if (event.op === "upsert") {
-    const listId = event.data.containerId;
+    const listId = pageOf(qc, event.data);
+    if (!listId) return;
     const store = stores.get(listId);
     if (store) {
       store.receive(event.data);

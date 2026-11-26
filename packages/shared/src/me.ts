@@ -62,6 +62,8 @@ export const meSchema = z.object({
   theme: themePreferenceSchema,
   timezone: z.string(),
   weekStart: weekStartSchema,
+  /** Play sounds (task completion); Settings → Sounds edits it in M6.2. */
+  soundsEnabled: z.boolean(),
   locale: localePreferenceSchema,
   version: z.number().int(),
 });

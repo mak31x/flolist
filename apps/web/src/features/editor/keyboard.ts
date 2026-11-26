@@ -5,9 +5,9 @@ import {
   isReferenceBlockType,
   isTextBlockType,
   normalizeInline,
-  positionBetween,
   positionsBetween,
   type Block,
+  type BlockContainer,
   type BlockDraft,
   type BlockType,
   type InlineNode,
@@ -23,6 +23,14 @@ import { historyKey, isMod } from "./keys.ts";
 import { focusAtomic, insertReference } from "./media.ts";
 import { markdownShortcut } from "./slash.ts";
 import type { BlockFields, LocalOp } from "./store.ts";
+import {
+  childrenOf,
+  containerOf,
+  parentBlockOf,
+  placeNear,
+  positionAtEnd,
+  sameContainer,
+} from "./tree.ts";
 
 export interface KeyContext {
   listId: string;
@@ -30,8 +38,17 @@ export interface KeyContext {
   /** Where uploads go (the list's workspace; a just-created list may still be saving). */
   workspaceId: () => Promise<string>;
   qc: QueryClient;
-  /** The blocks in order, as of now (including the unsaved placeholder of an empty list). */
+  /** The container this editor shows: the list, or a task's body (details panel). */
+  root: BlockContainer;
+  /**
+   * The visible rows in order, as of now: the root's blocks with subtasks nested under their
+   * tasks (including the unsaved placeholder of an empty list).
+   */
   rows: () => readonly Block[];
+  /** Every cached block of the page (all containers), for sibling positions. */
+  all: () => readonly Block[];
+  /** Opens a task's details (Mod+Enter, the row's arrow). */
+  openTask: (block: Block) => void;
   /** Whether the server/store knows this block yet (the placeholder doesn't). */
   isSaved: (id: string) => boolean;
   commands: EditorCommands;
@@ -55,7 +72,10 @@ export interface KeyContext {
 }
 
 /** Types whose Enter makes another block of the same type (lists-and-blocks.md). */
-const CONTINUES: ReadonlySet<BlockType> = new Set(["bullet", "numbered", "quote"]);
+const CONTINUES: ReadonlySet<BlockType> = new Set(["task", "bullet", "numbered", "quote"]);
+
+/** A block nested below the editor's root (a subtask shown under its task). */
+const nested = (ctx: KeyContext, block: Block) => !sameContainer(ctx.root, block);
 
 const inlineOf = (block: Block): InlineNode[] =>
   "inline" in block.content ? block.content.inline : [];
@@ -72,9 +92,55 @@ function upsert(ctx: KeyContext, block: Block, fields: BlockFields): LocalOp {
           position: block.position,
           indent: block.indent,
           content: block.content,
+          ...(block.containerType === "task" ? { container: containerOf(block) } : {}),
           ...fields,
         },
   };
+}
+
+/** Where a new block goes next to `block` (same container). */
+const near = (ctx: KeyContext, block: Block, side: "after" | "before") =>
+  placeNear(ctx.all().length > 0 ? ctx.all() : ctx.rows(), block, side);
+
+/**
+ * Tab on a task: it becomes the last subtask of the task above it (same container). Shift+Tab
+ * on a subtask: it moves out, right below its parent `[assumption: later siblings stay]`.
+ */
+function nestTask(ctx: KeyContext, block: Block, by: 1 | -1, caret: CaretOffset): boolean {
+  const all = ctx.all();
+  if (!ctx.isSaved(block.id)) return true;
+  let fields: BlockFields | null = null;
+  if (by === 1) {
+    const siblings = childrenOf(all, containerOf(block));
+    const index = siblings.findIndex((b) => b.id === block.id);
+    const above = siblings
+      .slice(0, Math.max(0, index))
+      .reverse()
+      .find((b) => b.type === "task");
+    if (above?.taskId && siblings[index - 1]?.id === above.id) {
+      const body: BlockContainer = { type: "task", id: above.taskId };
+      fields = { container: body, position: positionAtEnd(all, body) };
+    }
+  } else if (nested(ctx, block)) {
+    const parent = parentBlockOf(all, block);
+    if (parent) fields = { container: containerOf(parent), ...near(ctx, parent, "after") };
+  }
+  if (fields) {
+    ctx.commands.run([{ op: "upsert", id: block.id, fields }], {
+      focus: { id: block.id, target: caret },
+    });
+  }
+  return true;
+}
+
+type CaretOffset = { offset: number } | "start" | "end";
+
+/** Mod+D: completes or reopens a task. */
+export function toggleTask(ctx: KeyContext, block: Block): void {
+  if (block.type !== "task" || !ctx.isSaved(block.id)) return;
+  ctx.commands.run([
+    { op: "upsert", id: block.id, fields: { completed: !block.task?.completedAt } },
+  ]);
 }
 
 /**
@@ -132,10 +198,13 @@ function setText(editor: Editor | undefined, inline: readonly InlineNode[]) {
 }
 
 function enter(ctx: KeyContext, block: Block, editor: Editor): boolean {
-  const { next } = neighbours(ctx, block.id);
   const text = docToInline(editor.getJSON());
 
-  // Enter on an empty list item or quote turns it into a paragraph.
+  // Enter on an empty subtask moves it out a level [assumption].
+  if (text.length === 0 && block.type === "task" && nested(ctx, block)) {
+    return nestTask(ctx, block, -1, "start");
+  }
+  // Enter on an empty task, list item or quote turns it into a paragraph.
   if (text.length === 0 && CONTINUES.has(block.type)) {
     ctx.commands.run([upsert(ctx, block, { type: "paragraph" })], {
       focus: { id: block.id, target: "start" },
@@ -143,11 +212,9 @@ function enter(ctx: KeyContext, block: Block, editor: Editor): boolean {
     return true;
   }
 
-  const { prev } = neighbours(ctx, block.id);
   const newId = uuidv7();
   // At the very start of a non-empty block: open an empty block above, keep the caret here.
   if (atStart(editor) && text.length > 0) {
-    const position = positionBetween(prev?.position ?? null, block.position);
     ctx.commands.run(
       [
         upsert(ctx, block, {}),
@@ -156,7 +223,7 @@ function enter(ctx: KeyContext, block: Block, editor: Editor): boolean {
           id: newId,
           fields: {
             type: CONTINUES.has(block.type) ? block.type : "paragraph",
-            position,
+            ...near(ctx, block, "before"),
             indent: block.indent,
             content: { inline: [] },
           },
@@ -179,7 +246,7 @@ function enter(ctx: KeyContext, block: Block, editor: Editor): boolean {
         id: newId,
         fields: {
           type,
-          position: positionBetween(block.position, next?.position ?? null),
+          ...near(ctx, block, "after"),
           indent: isIndentable(type) ? block.indent : 0,
           content: { inline: after },
         },
@@ -205,6 +272,8 @@ function merge(ctx: KeyContext, into: Block, from: Block, fromText: InlineNode[]
 
 function backspace(ctx: KeyContext, block: Block, editor: Editor): boolean {
   if (!atStart(editor)) return false;
+  // A nested subtask moves out first (as text it would vanish from the list view).
+  if (block.type === "task" && nested(ctx, block)) return nestTask(ctx, block, -1, "start");
   // A non-paragraph block becomes a paragraph first.
   if (block.type !== "paragraph") {
     ctx.commands.run([upsert(ctx, block, { type: "paragraph" })], {
@@ -243,7 +312,11 @@ function forwardDelete(ctx: KeyContext, block: Block, editor: Editor): boolean {
   return true;
 }
 
-function indent(ctx: KeyContext, block: Block, by: 1 | -1): boolean {
+function indent(ctx: KeyContext, block: Block, by: 1 | -1, editor?: Editor): boolean {
+  if (block.type === "task") {
+    const offset = editor ? editor.state.selection.from - 1 : 0;
+    return nestTask(ctx, block, by, { offset });
+  }
   if (!isIndentable(block.type)) return false;
   const { prev } = neighbours(ctx, block.id);
   // One level deeper than the item above at most [assumption].
@@ -283,7 +356,6 @@ export function turnInto(
       : docToInline(editor.getJSON())
     : inlineOf(block);
   const caret = remove ? { offset: Math.max(0, remove.from - 1) } : "end";
-  const { next } = neighbours(ctx, block.id);
   if (isReferenceBlockType(block.type)) return;
   if (isReferenceBlockType(type)) {
     // Media and sublists are new blocks of their own below this one (they replace it when
@@ -300,7 +372,7 @@ export function turnInto(
     return;
   }
   if (type === "divider") {
-    const after = positionBetween(block.position, next?.position ?? null);
+    const after = near(ctx, block, "after");
     const paragraph = uuidv7();
     if (text.length === 0) {
       ctx.commands.run(
@@ -309,7 +381,7 @@ export function turnInto(
           {
             op: "upsert",
             id: paragraph,
-            fields: { type: "paragraph", position: after, indent: 0, content: { inline: [] } },
+            fields: { type: "paragraph", ...after, indent: 0, content: { inline: [] } },
           },
         ],
         { focus: { id: paragraph, target: "start" } },
@@ -320,7 +392,7 @@ export function turnInto(
     ctx.commands.run(
       [
         upsert(ctx, block, { content: { inline: text } }),
-        { op: "upsert", id: paragraph, fields: { type: "divider", position: after, indent: 0 } },
+        { op: "upsert", id: paragraph, fields: { type: "divider", ...after, indent: 0 } },
       ],
       { focus: { id: block.id, target: caret } },
     );
@@ -377,17 +449,22 @@ export function deleteSelection(ctx: KeyContext): void {
   if (!focusNeighbour(before, "end")) focusNeighbour(after, "start");
 }
 
-/** New block ops for `drafts`, placed between two positions. */
-function insertOps(drafts: readonly BlockDraft[], after: string | null, before: string | null) {
-  const positions = positionsBetween(after, before, drafts.length);
+/** New block ops for `drafts`, placed right after `anchor` in its container. */
+function insertOps(ctx: KeyContext, drafts: readonly BlockDraft[], anchor: Block) {
+  const siblings = childrenOf(ctx.all(), containerOf(anchor));
+  const next = siblings[siblings.findIndex((b) => b.id === anchor.id) + 1];
+  const positions = positionsBetween(anchor.position, next?.position ?? null, drafts.length);
+  const container = anchor.containerType === "task" ? { container: containerOf(anchor) } : {};
   return drafts.map((d, i) => ({
     id: uuidv7(),
     op: {
       type: d.type,
       position: positions[i] as string,
+      ...container,
       indent: isIndentable(d.type) ? d.indent : 0,
       content: d.content,
       ...(d.fileId ? { fileId: d.fileId } : {}),
+      ...(d.type === "task" && d.completed ? { completed: true } : {}),
     } satisfies BlockFields,
   }));
 }
@@ -396,8 +473,7 @@ function insertOps(drafts: readonly BlockDraft[], after: string | null, before: 
 export function pasteAfterSelection(ctx: KeyContext, drafts: readonly BlockDraft[]): void {
   const bottom = selectedBlocks(ctx).at(-1);
   if (!bottom || drafts.length === 0) return;
-  const { next } = neighbours(ctx, bottom.id);
-  const inserted = insertOps(drafts, bottom.position, next?.position ?? null);
+  const inserted = insertOps(ctx, drafts, bottom);
   ctx.commands.run(inserted.map((b) => ({ op: "upsert", id: b.id, fields: b.op })));
   const first = inserted[0];
   const last = inserted.at(-1);
@@ -419,7 +495,6 @@ export function pasteIntoBlock(
   const [first, ...rest] = drafts;
   if (!first) return;
   const { before, after } = splitText(editor);
-  const { next } = neighbours(ctx, block.id);
   const ops: LocalOp[] = [];
   const queue: BlockDraft[] = [];
   const firstInline = "inline" in first.content ? first.content.inline : null;
@@ -457,7 +532,7 @@ export function pasteIntoBlock(
     }
   }
 
-  const inserted = insertOps(queue, block.position, next?.position ?? null);
+  const inserted = insertOps(ctx, queue, block);
   for (const b of inserted) ops.push({ op: "upsert", id: b.id, fields: b.op });
   const target = inserted.at(-1);
   ctx.commands.run(ops, {
@@ -606,6 +681,7 @@ export function handleBlockKey(
   if (ctx.slash.onKey(block, event)) return true;
   if (history(ctx, event)) return true;
   if (startSelection(ctx, block, event, editor)) return true;
+  if (taskKey(ctx, block, event)) return true;
   const plain = !event.altKey && !event.ctrlKey && !event.metaKey;
 
   switch (event.key) {
@@ -625,7 +701,7 @@ export function handleBlockKey(
       return plain && !event.shiftKey ? forwardDelete(ctx, block, editor) : false;
     case "Tab":
       if (event.altKey || event.ctrlKey || event.metaKey) return false;
-      if (!indent(ctx, block, event.shiftKey ? -1 : 1)) return false;
+      if (!indent(ctx, block, event.shiftKey ? -1 : 1, editor)) return false;
       event.preventDefault();
       return true;
     case "ArrowUp":
@@ -656,6 +732,22 @@ export function handleBlockKey(
     default:
       return false;
   }
+}
+
+/** Mod+D completes or reopens a task; Mod+Enter opens its details. */
+function taskKey(ctx: KeyContext, block: Block, event: KeyboardEvent): boolean {
+  if (block.type !== "task" || !isMod(event) || event.altKey || event.shiftKey) return false;
+  if (event.key.toLowerCase() === "d") {
+    event.preventDefault();
+    toggleTask(ctx, block);
+    return true;
+  }
+  if (event.key === "Enter" && ctx.isSaved(block.id)) {
+    event.preventDefault();
+    ctx.openTask(block);
+    return true;
+  }
+  return false;
 }
 
 /** Keys on a focused divider, media or sublist block: move, delete, or open a paragraph below. */
@@ -689,7 +781,7 @@ export function handleDividerKey(ctx: KeyContext, rendered: Block, event: Keyboa
             id,
             fields: {
               type: "paragraph",
-              position: positionBetween(block.position, next?.position ?? null),
+              ...near(ctx, block, "after"),
               indent: 0,
               content: { inline: [] },
             },
@@ -727,7 +819,7 @@ export function blockAction(ctx: KeyContext, rendered: Block, action: BlockActio
             id,
             fields: {
               type: current.type,
-              position: positionBetween(current.position, next?.position ?? null),
+              ...near(ctx, current, "after"),
               indent: current.indent,
               content: current.content,
               ...(current.fileId ? { fileId: current.fileId } : {}),

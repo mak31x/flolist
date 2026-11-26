@@ -177,6 +177,8 @@ describe("block change events", () => {
       content: { inline: [{ type: "text", text: "Title" }] },
       fileId: null,
       sublistId: null,
+      taskId: null,
+      task: null,
       createdBy: id(3),
       version: 1,
       createdAt: "2026-11-26T10:00:00.000Z",

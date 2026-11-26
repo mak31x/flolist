@@ -2,6 +2,7 @@ import type { ChangeEvent, ListIndexItem, Sidebar } from "@flolist/shared";
 import type { QueryClient } from "@tanstack/react-query";
 import { applyBlockChange, type BlockChangeEvent } from "../editor/store.ts";
 import { listKey, listPrefsKey, listsKey, sidebarKey } from "../lists/api.ts";
+import { activityKey } from "../tasks/api.ts";
 import {
   removeEntry,
   removeList,
@@ -30,6 +31,10 @@ const isNewer = (current: { version: number } | undefined, version: number) =>
  */
 export function applyChange(qc: QueryClient, event: ChangeEvent): void {
   switch (event.entity) {
+    case "task":
+      // Rows show tasks through their blocks (block events); the activity log refetches.
+      void qc.invalidateQueries({ queryKey: activityKey(event.id) });
+      return;
     case "list": {
       if (qc.isMutating({ mutationKey: mutationKeys.list(event.id) }) > 0) return;
       if (event.op === "delete") {

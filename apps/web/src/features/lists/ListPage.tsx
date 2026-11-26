@@ -19,6 +19,7 @@ import {
   Lock,
   MoreHorizontal,
   Printer,
+  RotateCcw,
   Settings2,
   Star,
   Trash2,
@@ -29,7 +30,10 @@ import { useListChannel } from "../sync/live-sync-context.ts";
 import { t } from "../../i18n/index.ts";
 import { useShell } from "../../shell/ui-store.ts";
 import { BlockEditor } from "../editor/BlockEditor.tsx";
+import { blocksQuery } from "../editor/api.ts";
 import { focusFirstBlock } from "../editor/focus.ts";
+import { markAllIncomplete } from "../editor/reopen.ts";
+import { useBlockStore } from "../editor/use-block-store.ts";
 import { listPrefsQuery, listQuery, listsKey, listsQuery, sidebarQuery } from "./api.ts";
 import { DeleteListDialog } from "./DeleteListDialog.tsx";
 import { EmojiPickerPopover } from "./EmojiPicker.tsx";
@@ -96,6 +100,7 @@ function ListPageFor({ listId }: { listId: string }) {
 }
 
 function ListDocument({ list }: { list: ListIndexItem }) {
+  const navigate = useNavigate();
   const updateList = useUpdateList(list.id);
   const updatePrefs = useUpdateListPrefs(list.id);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -142,6 +147,13 @@ function ListDocument({ list }: { list: ListIndexItem }) {
           listId={list.id}
           rootListId={list.rootListId}
           view={prefs}
+          onOpenTask={(block) => {
+            if (!block.taskId) return;
+            void navigate({
+              to: "/lists/$listId/tasks/$taskId",
+              params: { listId: list.id, taskId: block.taskId },
+            });
+          }}
           onExitTop={() => {
             document.querySelector<HTMLTextAreaElement>("[data-list-title]")?.focus();
           }}
@@ -256,6 +268,9 @@ function ListHeaderActions({ list, prefs }: { list: ListIndexItem; prefs: ListVi
   const unstar = useUnstar();
   const deleteList = useDeleteList();
   const duplicateList = useDuplicateList();
+  const store = useBlockStore(list.id, list.rootListId, me.id);
+  const { data: blocks } = useQuery(blocksQuery(list.id));
+  const anyCompleted = blocks?.some((b) => b.task?.completedAt) ?? false;
   const { data: workspaces } = useQuery(workspacesQuery);
   const team = workspaces?.find((w) => w.id === list.workspaceId && w.kind === "team");
   const customizing = useShell((s) => s.customizing);
@@ -298,6 +313,15 @@ function ListHeaderActions({ list, prefs }: { list: ListIndexItem; prefs: ListVi
             }}
           >
             {t("lists.customize")}
+          </MenuItem>
+          <MenuItem
+            icon={<RotateCcw />}
+            disabled={!anyCompleted}
+            onSelect={() => {
+              markAllIncomplete(store);
+            }}
+          >
+            {t("lists.markAllIncomplete")}
           </MenuItem>
           <MenuItem
             icon={<Printer />}

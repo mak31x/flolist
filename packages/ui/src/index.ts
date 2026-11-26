@@ -40,6 +40,7 @@ export {
   PopoverContent,
   PopoverTrigger,
 } from "./components/Popover.tsx";
+export { ProgressRing, type ProgressRingProps } from "./components/ProgressRing.tsx";
 export { SegmentedTabs, type SegmentedTab } from "./components/SegmentedTabs.tsx";
 export { SkeletonSquiggle } from "./components/SkeletonSquiggle.tsx";
 export { Toaster } from "./components/Toast.tsx";

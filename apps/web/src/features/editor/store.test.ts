@@ -27,6 +27,8 @@ function block(n: number, over: Partial<Block> = {}): Block {
     content: text(`block ${String(n)}`),
     fileId: null,
     sublistId: null,
+    taskId: null,
+    task: null,
     createdBy: null,
     version: 1,
     createdAt: "2026-11-26T10:00:00.000Z",
@@ -427,5 +429,91 @@ describe("applyBlockChange", () => {
       data: block(7),
     });
     expect(cache().map((b) => b.id)).toEqual([id(1), id(7)]);
+  });
+});
+
+describe("BlockStore tasks", () => {
+  it("gives a new task block a task id and sends it as `task`", async () => {
+    const { store, server, cache } = setup();
+    store.apply([
+      { op: "upsert", id: id(3), fields: { type: "task", position: "a3", content: text("Pay") } },
+    ]);
+    const row = cache().find((b) => b.id === id(3));
+    expect(row?.taskId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(row?.task).toEqual({ completedAt: null, completedBy: null });
+    await store.flush();
+    expect(server.calls[0]?.ops[0]).toMatchObject({ op: "upsert", task: { id: row?.taskId } });
+  });
+
+  it("completes optimistically and undoes to incomplete", async () => {
+    const task = block(1, {
+      type: "task",
+      taskId: id(91),
+      task: { completedAt: null, completedBy: null },
+    });
+    const { store, server, cache } = setup([task], { userId: id(50) });
+    const inverse = store.apply([{ op: "upsert", id: id(1), fields: { completed: true } }]);
+    expect(cache()[0]?.task?.completedBy).toBe(id(50));
+    expect(inverse).toEqual([{ op: "upsert", id: id(1), fields: { completed: false } }]);
+    await store.flush();
+    expect(server.calls[0]?.ops).toEqual([{ op: "upsert", id: id(1), task: { completed: true } }]);
+  });
+
+  it("moving into a task body is undone by moving back to the list", () => {
+    const { store, cache } = setup();
+    const inverse = store.apply([
+      {
+        op: "upsert",
+        id: id(2),
+        fields: { position: "a0", container: { type: "task", id: id(91) } },
+      },
+    ]);
+    expect(cache().find((b) => b.id === id(2))).toMatchObject({
+      containerType: "task",
+      containerId: id(91),
+    });
+    expect(inverse).toEqual([
+      {
+        op: "upsert",
+        id: id(2),
+        fields: { position: "a2", container: { type: "list", id: listId } },
+      },
+    ]);
+  });
+
+  it("turning a task into text and back keeps the same task id", () => {
+    const task = block(1, {
+      type: "task",
+      taskId: id(91),
+      task: { completedAt: null, completedBy: null },
+    });
+    const { store, cache } = setup([task]);
+    const inverse = store.apply([{ op: "upsert", id: id(1), fields: { type: "paragraph" } }]);
+    expect(cache()[0]).toMatchObject({ type: "paragraph", taskId: null, task: null });
+    store.apply(inverse);
+    expect(cache()[0]).toMatchObject({ type: "task", taskId: id(91) });
+  });
+});
+
+describe("live task-body events", () => {
+  it("land in the page that holds the parent task", () => {
+    const qc = new QueryClient();
+    const parent = block(1, {
+      type: "task",
+      taskId: id(91),
+      task: { completedAt: null, completedBy: null },
+    });
+    qc.setQueryData(blocksKey(listId), [parent]);
+    const sub = block(2, { containerType: "task", containerId: id(91), version: 3 });
+    applyBlockChange(qc, {
+      type: "change",
+      op: "upsert",
+      entity: "block",
+      id: sub.id,
+      version: 3,
+      clientMutationId: null,
+      data: sub,
+    });
+    expect(qc.getQueryData<Block[]>(blocksKey(listId))?.map((b) => b.id)).toEqual([id(1), id(2)]);
   });
 });

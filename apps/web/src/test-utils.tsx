@@ -19,6 +19,7 @@ export const testMe: Me = {
   theme: "system",
   timezone: "UTC",
   weekStart: "system",
+  soundsEnabled: true,
   locale: "system",
   version: 1,
 };

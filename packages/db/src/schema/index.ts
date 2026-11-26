@@ -4,3 +4,4 @@ export * from "./files.ts";
 export * from "./lists.ts";
 export * from "./sync.ts";
 export * from "./blocks.ts";
+export * from "./tasks.ts";

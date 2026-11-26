@@ -52,8 +52,8 @@
 - Native shells (M10+) also schedule reminders locally (Tauri notification plugin, Capacitor local-notifications) so they fire offline. The server push is deduplicated per device by `reminders.sent_at` [assumption].
 
 ## Subtasks
-- Subtasks are task blocks inside a parent task's body. Create them in the details panel, by pressing Tab on a task in a list, or on mobile by swiping a task left and choosing "add subtasks".
-- In lists and views, the parent shows a progress ring with a "done/total" count. Subtasks render nested under the parent in Inbox, Today and lists (collapsible).
+- Subtasks are task blocks inside a parent task's body. Create them in the details panel, by pressing Tab on a task in a list (it becomes the last subtask of the task directly above; Shift+Tab, or Enter/Backspace on an empty subtask, moves it back out below its parent) [assumption], or on mobile by swiping a task left and choosing "add subtasks". Subtasks nest at most 4 levels deep [assumption].
+- In lists and views, the parent shows a progress ring with a "done/total" count of its direct subtasks [assumption]. Subtasks render nested under the parent in Inbox, Today and lists (collapsible).
 - Subtasks have the same properties as tasks (dates, assignee and so on) and can appear in Today/Week on their own merits, with a "↳ Parent title" breadcrumb.
 - Completing a parent does **not** auto-complete its subtasks (Superlist parity) [assumption]. Deleting a parent sends its subtasks to Trash with it.
 
@@ -75,7 +75,7 @@ Open details · Complete/Uncomplete (⌘D) · Set due date · Assign · Label ·
 An exact copy of the task with its body and subtasks: incomplete, no assignee, no due date. It is inserted directly below the original.
 
 ## Activity log
-Recorded for: created, title changed, completed/reopened (with the new due date for recurrences), due date set/changed/cleared, assignee changed, moved between lists, priority changed, labels changed, restored from trash. Each entry is shown as "1:49 pm: Karan changed the due date to 1 Dec", grouped under day separators and interleaved with messages.
+Recorded for: created, title changed, completed/reopened (with the new due date for recurrences), due date set/changed/cleared, assignee changed, moved between lists, priority changed, labels changed, restored from trash. Each entry is shown as "1:49 pm: Karan changed the due date to 1 Dec", grouped under day separators and interleaved with messages. Title edits by the same person within 10 minutes merge into one entry [assumption].
 
 ## Printing / export
 A task (or list) prints with a clean stylesheet. Copy-as-Markdown preserves subtasks as nested `- [ ]` items.

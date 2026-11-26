@@ -44,6 +44,7 @@ function toDto(u: UserRow): Me {
     theme: theme.success ? theme.data : "system",
     timezone: u.timezone,
     weekStart: u.weekStart,
+    soundsEnabled: u.soundsEnabled,
     locale: locale.success ? locale.data : "system",
     version: u.version,
   };

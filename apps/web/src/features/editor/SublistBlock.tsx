@@ -6,14 +6,17 @@ import { ChevronRight } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import { t } from "../../i18n/index.ts";
 import { listQuery, listsKey } from "../lists/api.ts";
+import { openTaskCount } from "../lists/list-view.ts";
+import { blocksQuery } from "./api.ts";
 import { ListIcon } from "../lists/ListIcon.tsx";
 import { useUpdateList } from "../lists/mutations.ts";
 import type { AtomicProps } from "./MediaBlocks.tsx";
 
 /**
  * A sublist row (lists-and-blocks.md → Sublists): list icon, a title you can rename in place,
- * and an arrow that opens the sublist as its own page. The open-task count joins it with
- * tasks (M3.1). The title field is the block's focus target.
+ * its open-task count, and an arrow that opens the sublist as its own page. The title field is
+ * the block's focus target. The count reads the sublist's blocks, which live sync keeps fresh
+ * (sublists share their root's channel).
  */
 export function SublistBlock({
   block,
@@ -33,6 +36,8 @@ export function SublistBlock({
     ...(fromIndex ? { initialData: fromIndex } : {}),
   });
   const updateList = useUpdateList(id, { ready });
+  const { data: sublistBlocks } = useQuery({ ...blocksQuery(id), enabled: id !== "" });
+  const open = sublistBlocks ? openTaskCount(sublistBlocks) : 0;
   const title = list?.title ?? "";
   const [draft, setDraft] = useState(title);
   const [focused, setFocused] = useState(false);
@@ -46,7 +51,7 @@ export function SublistBlock({
     const next = draft.trim();
     if (next !== title) updateList.mutate({ title: next });
   };
-  const open = () => {
+  const openPage = () => {
     commit();
     void ready().then(() => navigate({ to: "/lists/$listId", params: { listId: id } }));
   };
@@ -57,7 +62,7 @@ export function SublistBlock({
     const atEnd = el.selectionStart === el.value.length;
     if (isModEnter(e)) {
       e.preventDefault();
-      open();
+      openPage();
       return;
     }
     switch (e.key) {
@@ -112,9 +117,15 @@ export function SublistBlock({
         onKeyDown={onKey}
         className="min-w-0 flex-1 bg-transparent text-body font-medium text-text outline-none placeholder:text-text-subtle"
       />
+      {open > 0 && (
+        <span className="shrink-0 text-meta text-text-muted tabular-nums">
+          <span aria-hidden>{open}</span>
+          <span className="sr-only">{t("editor.sublist.openTasks", { count: open })}</span>
+        </span>
+      )}
       <button
         type="button"
-        onClick={open}
+        onClick={openPage}
         aria-label={t("editor.sublist.open", { title: draft || t("editor.sublist.placeholder") })}
         className={cn(
           "flex size-7 items-center justify-center rounded-md text-text-muted hover:bg-surface-selected hover:text-text [&_svg]:size-4",

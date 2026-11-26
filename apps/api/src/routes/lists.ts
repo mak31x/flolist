@@ -1,4 +1,12 @@
-import { blocks, files, lists, listViewPrefs, sidebarEntries, workspaces } from "@flolist/db";
+import {
+  blocks,
+  files,
+  lists,
+  listViewPrefs,
+  sidebarEntries,
+  tasks,
+  workspaces,
+} from "@flolist/db";
 import {
   channel,
   clientMutationSchema,
@@ -434,7 +442,12 @@ async function copyTree(
   const listIds = new Map<string, string>(
     ids.map((old) => [old, old === source.id ? rootId : uuidv7()]),
   );
-  const sourceBlocks = await tx
+  const sourceTasks = await tx
+    .select()
+    .from(tasks)
+    .where(and(inArray(tasks.listId, ids), isNull(tasks.deletedAt)));
+  const taskIds = new Map<string, string>(sourceTasks.map((t) => [t.id, uuidv7()]));
+  const listBlocks = await tx
     .select()
     .from(blocks)
     .where(
@@ -444,6 +457,20 @@ async function copyTree(
         isNull(blocks.deletedAt),
       ),
     );
+  const bodyBlocks =
+    sourceTasks.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(blocks)
+          .where(
+            and(
+              eq(blocks.containerType, "task"),
+              inArray(blocks.containerId, [...taskIds.keys()]),
+              isNull(blocks.deletedAt),
+            ),
+          );
+  const sourceBlocks = [...listBlocks, ...bodyBlocks];
   const blockIds = new Map<string, string>(sourceBlocks.map((b) => [b.id, uuidv7()]));
   const mapped = (map: Map<string, string>, old: string | null) =>
     old === null ? null : (map.get(old) ?? null);
@@ -475,13 +502,46 @@ async function copyTree(
     created.push(row);
   }
 
-  const live = sourceBlocks.filter((b) => b.sublistId === null || listIds.has(b.sublistId));
+  // Tasks keep their title and completion [assumption: an exact copy]; parents go first.
+  const depth = (t: (typeof sourceTasks)[number]): number => {
+    let d = 0;
+    for (let p = t.parentTaskId; p && d < 64; d++) {
+      p = sourceTasks.find((x) => x.id === p)?.parentTaskId ?? null;
+    }
+    return d;
+  };
+  const orderedTasks = [...sourceTasks].sort((a, b) => depth(a) - depth(b));
+  for (let i = 0; i < orderedTasks.length; i += 500) {
+    await tx.insert(tasks).values(
+      orderedTasks.slice(i, i + 500).map((t) => ({
+        id: taskIds.get(t.id) ?? uuidv7(),
+        workspaceId: source.workspaceId,
+        rootListId: rootId,
+        listId: mapped(listIds, t.listId),
+        parentTaskId: mapped(taskIds, t.parentTaskId),
+        title: t.title,
+        titleInline: t.titleInline,
+        completedAt: t.completedAt,
+        completedBy: t.completedBy,
+        createdBy: userId,
+      })),
+    );
+  }
+
+  const live = sourceBlocks.filter(
+    (b) =>
+      (b.sublistId === null || listIds.has(b.sublistId)) &&
+      (b.taskId === null || taskIds.has(b.taskId)),
+  );
   for (let i = 0; i < live.length; i += 500) {
     await tx.insert(blocks).values(
       live.slice(i, i + 500).map((b) => ({
         id: blockIds.get(b.id) ?? uuidv7(),
-        containerType: "list" as const,
-        containerId: listIds.get(b.containerId) ?? rootId,
+        containerType: b.containerType,
+        containerId:
+          b.containerType === "task"
+            ? (taskIds.get(b.containerId) ?? rootId)
+            : (listIds.get(b.containerId) ?? rootId),
         rootListId: rootId,
         position: b.position,
         type: b.type,
@@ -489,6 +549,7 @@ async function copyTree(
         content: b.content,
         fileId: b.fileId,
         sublistId: mapped(listIds, b.sublistId),
+        taskId: mapped(taskIds, b.taskId),
         createdBy: userId,
       })),
     );

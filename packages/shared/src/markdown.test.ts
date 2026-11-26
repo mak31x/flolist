@@ -162,14 +162,14 @@ describe("Markdown to blocks", () => {
     expect(levels("- 0\n - 1\n  - 2\n   - 3\n    - 4\n     - 5")).toEqual([0, 1, 2, 3, 4, 4]);
   });
 
-  it("maps H4–H6 to H3, drops checklist markers and keeps fenced code", () => {
+  it("maps H4–H6 to H3, reads checklists as tasks and keeps fenced code", () => {
     const blocks = markdownToBlocks(
       "#### Deep\n\n- [ ] todo\n- [x] done\n\n```ts\nconst a = 1;\n\nend\n```",
     );
     expect(blocks).toEqual([
       draft("heading3", [t("Deep")]),
-      draft("bullet", [t("todo")]),
-      draft("bullet", [t("done")]),
+      { ...draft("task", [t("todo")]), completed: false },
+      { ...draft("task", [t("done")]), completed: true },
       draft("paragraph", [
         t("const a = 1;", "code"),
         { type: "hardBreak" },
@@ -260,5 +260,16 @@ describe("media and sublist blocks", () => {
         '<p><a href="/api/v1/files/0190a5d2-7c1e-7000-8000-000000000002">notes.pdf</a></p>' +
         "<p>Packing</p>",
     );
+  });
+});
+
+describe("task blocks in Markdown and HTML", () => {
+  it("write as checklist items", () => {
+    const blocks = [
+      { type: "task" as const, indent: 0, content: { inline: [t("open")] }, completed: false },
+      { type: "task" as const, indent: 0, content: { inline: [t("done")] }, completed: true },
+    ];
+    expect(blocksToMarkdown(blocks)).toBe("- [ ] open\n- [x] done");
+    expect(blocksToHtml(blocks)).toBe("<p>☐ open</p><p>☑ done</p>");
   });
 });

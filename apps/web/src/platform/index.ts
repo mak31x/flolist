@@ -137,3 +137,34 @@ export function printPage(): void {
 export function openExternal(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+let audio: AudioContext | null = null;
+
+/**
+ * The task-completion sound. Synthesised with Web Audio, which every webview the native
+ * shells use provides, so no audio file ships. Silent where audio isn't available.
+ */
+export function playCompleteSound(): void {
+  if (typeof AudioContext === "undefined") return;
+  try {
+    audio ??= new AudioContext();
+    const ctx = audio;
+    const start = ctx.currentTime;
+    // Two soft rising notes [assumption: Superlist's sound isn't copied].
+    for (const [i, freq] of [880, 1318.5].entries()) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const at = start + i * 0.07;
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, at);
+      gain.gain.setValueAtTime(0, at);
+      gain.gain.linearRampToValueAtTime(0.12, at + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.2);
+    }
+  } catch {
+    // Audio blocked (no user gesture yet, or no output device): stay silent.
+  }
+}

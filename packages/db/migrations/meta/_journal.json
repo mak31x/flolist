@@ -43,6 +43,13 @@
       "when": 1795666938215,
       "tag": "0005_media_sublists",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795683501155,
+      "tag": "0006_tasks_activity",
+      "breakpoints": true
     }
   ]
 }
