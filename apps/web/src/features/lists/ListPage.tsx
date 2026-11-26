@@ -18,7 +18,8 @@ import { useMe } from "../auth/hooks.ts";
 import { useListChannel } from "../sync/live-sync-context.ts";
 import { t } from "../../i18n/index.ts";
 import { useShell } from "../../shell/ui-store.ts";
-import { EmptyTasks } from "../../views/Page.tsx";
+import { BlockEditor } from "../editor/BlockEditor.tsx";
+import { focusFirstBlock } from "../editor/focus.ts";
 import { listQuery, listsKey, sidebarQuery } from "./api.ts";
 import { DeleteListDialog } from "./DeleteListDialog.tsx";
 import { EmojiPickerPopover } from "./EmojiPicker.tsx";
@@ -26,7 +27,7 @@ import { ListIcon } from "./ListIcon.tsx";
 import { markOpened, useDeleteList, usePutEntry, useUnstar, useUpdateList } from "./mutations.ts";
 import type { ListIndexItem } from "@flolist/shared";
 
-/** `/lists/:listId` (lists-and-blocks.md → Lists). Blocks arrive in M2.2. */
+/** `/lists/:listId` (lists-and-blocks.md → Lists): header, title and the block editor. */
 export function ListPage() {
   const { listId } = useParams({ strict: false });
   if (!listId) return null;
@@ -97,7 +98,13 @@ function ListDocument({ list }: { list: ListIndexItem }) {
       </div>
       <ListTitle list={list} />
       <div className="mt-6">
-        <EmptyTasks message={t("lists.emptyBody")} />
+        <BlockEditor
+          listId={list.id}
+          rootListId={list.rootListId}
+          onExitTop={() => {
+            document.querySelector<HTMLTextAreaElement>("[data-list-title]")?.focus();
+          }}
+        />
       </div>
     </div>
   );
@@ -158,6 +165,7 @@ function ListTitle({ list }: { list: ListIndexItem }) {
       <textarea
         ref={ref}
         aria-label={t("lists.titleLabel")}
+        data-list-title
         rows={1}
         maxLength={200}
         value={draft}
@@ -178,10 +186,11 @@ function ListTitle({ list }: { list: ListIndexItem }) {
           }, 600);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.key === "Enter" || (e.key === "ArrowDown" && atEnd(e.currentTarget))) {
+            // Enter and ↓ continue into the list's first block (keyboard-first writing).
             e.preventDefault();
             save(draft);
-            e.currentTarget.blur();
+            if (!focusFirstBlock()) e.currentTarget.blur();
           } else if (e.key === "Escape") {
             e.currentTarget.blur();
           }
@@ -194,6 +203,9 @@ function ListTitle({ list }: { list: ListIndexItem }) {
     </>
   );
 }
+
+const atEnd = (el: HTMLTextAreaElement) =>
+  el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
 
 function ListHeaderActions({ list }: { list: ListIndexItem }) {
   const me = useMe();

@@ -111,3 +111,8 @@ export function socketUrl(): string {
 
 /** Opens a WebSocket (Tauri and Capacitor webviews provide the browser API). */
 export const openSocket = (url: string): WebSocket => new WebSocket(url);
+
+/** Opens a link outside the app (the system browser in native shells, a new tab on the web). */
+export function openExternal(url: string): void {
+  window.open(url, "_blank", "noopener,noreferrer");
+}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blockSchema } from "./blocks.ts";
 import { listSchema, sectionSchema, sidebarEntrySchema } from "./lists.ts";
 
 /**
@@ -41,8 +42,15 @@ export const changeEventSchema = z.union([
   }),
   z.object({
     ...changeBase,
+    op: z.literal("upsert"),
+    entity: z.literal("block"),
+    id: z.uuid(),
+    data: blockSchema,
+  }),
+  z.object({
+    ...changeBase,
     op: z.literal("delete"),
-    entity: z.enum(["list", "section", "sidebarEntry"]),
+    entity: z.enum(["list", "section", "sidebarEntry", "block"]),
     id: z.uuid(),
   }),
 ]);

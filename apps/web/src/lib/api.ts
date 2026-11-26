@@ -16,6 +16,11 @@ export class ApiRequestError extends Error {
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
+export interface ApiOptions {
+  /** Let the request outlive the page (a flush on `pagehide`). Bodies must stay under 64 KB. */
+  keepalive?: boolean;
+}
+
 /**
  * Calls `/api/v1{path}` on the app's own origin (D-019/D-029) with the session cookie and
  * parses the answer with `schema`. Throws `ApiRequestError` on any non-2xx.
@@ -25,20 +30,24 @@ export async function api<S extends z.ZodType>(
   path: string,
   schema: S,
   body?: unknown,
+  options?: ApiOptions,
 ): Promise<z.output<S>>;
 export async function api(
   method: Method,
   path: string,
   schema?: undefined,
   body?: unknown,
+  options?: ApiOptions,
 ): Promise<void>;
 export async function api(
   method: Method,
   path: string,
   schema?: z.ZodType,
   body?: unknown,
+  options: ApiOptions = {},
 ): Promise<unknown> {
   const init: RequestInit = { method, credentials: "include" };
+  if (options.keepalive) init.keepalive = true;
   if (body !== undefined) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);

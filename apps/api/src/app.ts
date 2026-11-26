@@ -12,6 +12,7 @@ import { rateLimit } from "./middleware/rate-limit.ts";
 import { originCheck } from "./middleware/origin-check.ts";
 import { requestLog } from "./middleware/request-log.ts";
 import { fileRoutes, uploadRoutes, type FileRoutesOptions } from "./routes/files.ts";
+import { blockRoutes } from "./routes/blocks.ts";
 import { listRoutes } from "./routes/lists.ts";
 import { meRoutes } from "./routes/me.ts";
 import { sectionRoutes, sidebarRoutes } from "./routes/sidebar.ts";
@@ -147,6 +148,7 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/api/v1/files", fileRoutes(files));
   app.route("/api/v1/workspaces", workspaceRoutes);
   app.route("/api/v1/lists", listRoutes);
+  app.route("/api/v1/lists", blockRoutes);
   app.route("/api/v1/sections", sectionRoutes);
   app.route("/api/v1/sidebar", sidebarRoutes);
 

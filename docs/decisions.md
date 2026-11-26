@@ -331,6 +331,42 @@ Decision:
 - Drag: lists reorder by mouse, touch and keyboard, within and across sections; sections by mouse/touch only `[assumption]`, keyboard reorder is Backlog.
 - `activity_events` is deferred to the tasks/activity phases.
 
+
+## D-045 — Blocks storage and the batch API (M2.2)  (2026-11-26 · Accepted)
+Decision:
+- `blocks` (migration 0004) has data-model.md's columns except `task_id`, `sublist_id` and `file_id`, which arrive with those block types (M2.3/M3.1). `position` is `text collate "C"`, so the partial index `(container_type, container_id, position) where deleted_at is null` serves the byte-wise order (D-041) directly. The type/indent CHECKs come from `blockTypes`/`blockMaxIndent` in packages/db; a type-level check in the API keeps them equal to packages/shared.
+- Content is Tiptap's own inline JSON: text blocks `{ inline: [...] }` (text with bold/italic/strike/code/link marks, hard breaks; ≤ 20 000 characters), dividers `{ color }`. Links must be http(s) or mailto. Block types so far: paragraph, heading1–3, bullet, numbered, quote, divider.
+- `GET /lists/:id/blocks` (`list.view`) and `POST /lists/:id/blocks/batch` (`list.edit`; ≤ 500 ops, one per block): one transaction through `runMutation`. `upsert` creates (type + position required) or changes only the sent fields (field-level LWW); an upsert of a soft-deleted block of the same list restores it (undo). `move` = position (+ indent). `delete` soft-deletes (`trash_root_id` = the block) and is a no-op when the block is already gone. Using another container's block id fails (409 upsert, 404 move/delete).
+- `resolveBlockShape` (packages/shared) is the one rule for type changes, on server and client: content that still fits is kept, otherwise reset; non-list types flatten to indent 0.
+- Blocks have no matrix actions: access is the list's (resolved through the root). Events go to `list:<rootId>` only.
+
+## D-046 — Editor sync on the client (M2.2)  (2026-11-26 · Accepted)
+Decision:
+- One `BlockStore` per open list owns the write side: `apply()` patches the query cache at once and queues ops per block (repeat edits merge; a merged type change sends its resolved content and indent). Typing flushes after a 500 ms pause, commands at once, and pending edits flush when the list closes, the tab hides and on `pagehide` (`keepalive`). One batch in flight; transient failures (network, 5xx, 429) retry with the same `clientMutationId`; anything else drops the queue, refetches the list, clears undo and toasts.
+- Block events skip D-043's "wait for the pending mutation" rule: rows from batch answers, live events and refetches are applied by version, with queued and in-flight local changes laid on top (`receive`, `mergeFetched`), so remote changes and refetches never undo unsent typing.
+- A just-created list is seeded with an empty block cache, and the store waits for its pending create mutation before sending (`ready()`).
+- TanStack Query delivers cache notifications in a microtask (`notifyManager.setScheduler(queueMicrotask)` in main.tsx) instead of a `setTimeout`, so a command (Enter) renders its new block and moves focus there before the next key event. Caret placement is synchronous (`view.focus()`), not Tiptap's next-frame `focus()`; focus requested for a block that hasn't mounted waits and is applied in a microtask after the commit (StrictMode replays mount effects).
+
+## D-047 — Editor behaviour chosen in M2.2  (2026-11-26 · Accepted)
+Decision (all `[assumption]` where Superlist's behaviour is unknown):
+- Every text block mounts its own Tiptap editor (a one-paragraph document; Tiptap history off). architecture.md's "static HTML until focus" is deferred to M8.2 with virtualization: mounting an editor on tap loses iOS's focus-in-gesture for the keyboard.
+- Text styles: H1 26/32 bold, H2 21/28 semibold, H3 17/24 semibold (display font for H1/H2). Numbered levels count 1. / a. / i.; bullets •, ◦, ▪. Indent max 4, and at most one deeper than the list item above. Dividers come in six colours (theme tokens `--divider-gray|red|orange|green|blue|purple`).
+- Enter: lists and quotes continue, everything else continues as a paragraph at the end of a block (a mid-block split keeps the type); an empty list item or quote becomes a paragraph; at the very start of a non-empty block it opens an empty block above. Backspace at the start: non-paragraph → paragraph, paragraph → merge into the previous text block, right after a divider → delete the divider. Delete at the end merges the next block in. Shift+Enter is a hard break.
+- A remote change to the block being edited shows once it loses focus. Links: ⌘L opens a small prompt (selection → link it; caret → insert the URL as a link; empty → remove), Mod+click opens a link via the `openExternal` platform adapter.
+- Enter or ↓ in the list title moves into the first block; ↑ from the first block goes back to the title. The empty-list placeholder is an unsaved paragraph that's created on first input.
+- Markdown shortcuts (`#`/`##`/`###`, `-`/`*`, `1.`/`1)`, `>` + space) apply to paragraphs only; `---` becomes a divider on the third dash and moves the caret to a new paragraph. Mark input rules (`**`, `*`, `~~`, `` ` ``) come from Tiptap.
+- Slash menu: only the built types, in spec order (Task, Sublist, Image, Attachment join in M2.3/M3.1), filtered by label or alias. Divider on an empty block turns it into the divider (+ a paragraph below); on a block with text it inserts the divider below.
+- Block handle (desktop/tablet only; phones use "/" and the keyboard): ⋮⋮ drags by mouse, touch or keyboard (dnd-kit), within the list only (sidebar, sublists and Week drops come with M2.3/M3/M4); the block-type button opens a flat menu: Turn into, Colour (dividers), Duplicate, Delete.
+
+## D-048 — Block selection, clipboard and undo (M2.2)  (2026-11-26 · Accepted)
+Decision:
+- Block selection starts with Esc (that block), Mod+A on already-selected or empty text (all blocks), or Shift+↑/↓ at a block's first/last line. The editor container then has focus: Shift+↑/↓ extend, ↑/↓ move, Enter/Esc return to text, Backspace/Delete delete, Tab/Shift+Tab indent list items, Mod+A selects all. A live region announces the count.
+- Copy/cut write Markdown (`text/plain`), HTML and the internal JSON (`application/x-flolist-blocks`, also embedded in the HTML as `data-flolist-blocks` because some webviews drop custom types). Paste reads JSON, else HTML (headings, nested lists, quotes, rules, code, marks, safe links; Google Docs' fake bold ignored), else the text as Markdown; checklist markers become bullets until tasks exist. One pasted block goes to Tiptap inline; several split the current block: the first joins the text before the caret (or an empty block takes its type), the text after the caret ends up after the paste. Pasting into a block selection inserts below it and selects the pasted blocks.
+- Undo/redo (Mod+Z, Mod+Shift+Z, Ctrl+Y off Apple, and `historyUndo/Redo` input events) is one stack per open list: every command records the inverse ops `BlockStore.apply` returns; typing in one block groups into one step until a 1 s pause or another command; 200 steps; cleared on rollback. Undo/redo are ordinary batches to the server.
+
+## D-049 — Libraries pinned in M2.2  (2026-11-26 · Accepted)
+Decision: Tiptap **3.35.0** in apps/web: `@tiptap/core`, `@tiptap/react`, `@tiptap/pm`, `@tiptap/extensions` and the extensions `document`, `paragraph`, `text`, `hard-break`, `bold`, `italic`, `strike`, `code`, `link` (no StarterKit). `apps/e2e` gets the DOM lib for `page.evaluate` callbacks.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

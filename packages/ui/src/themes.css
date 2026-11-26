@@ -66,6 +66,14 @@
   --avatar-6: #c0468a;
   --on-avatar: #ffffff;
 
+  /* Divider blocks: "colourful" dividers [assumption: 6 colours] */
+  --divider-gray: #d6d6e0;
+  --divider-red: #e5533d;
+  --divider-orange: #e8892b;
+  --divider-green: #3e9e63;
+  --divider-blue: #2f80c2;
+  --divider-purple: #7a5ce0;
+
   --shadow-popover: 0 8px 32px rgb(20 20 40 / 0.12), 0 1px 2px rgb(20 20 40 / 0.06);
   --shadow-lifted: 0 6px 20px rgb(20 20 40 / 0.14);
 }
@@ -123,6 +131,13 @@
   --avatar-5: #3485c7;
   --avatar-6: #c24c8d;
   --on-avatar: #ffffff;
+
+  --divider-gray: #4a4a58;
+  --divider-red: #e0624d;
+  --divider-orange: #e0912f;
+  --divider-green: #48a86d;
+  --divider-blue: #3d8fd4;
+  --divider-purple: #8a72e6;
 
   --shadow-popover: 0 8px 32px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.06);
   --shadow-lifted: 0 6px 20px rgb(0 0 0 / 0.5);

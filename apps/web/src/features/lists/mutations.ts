@@ -1,6 +1,7 @@
 import {
   positionAfter,
   uuidv7,
+  type Block,
   type ListIndexItem,
   type Section,
   type Sidebar,
@@ -14,6 +15,7 @@ import {
   type QueryKey,
 } from "@tanstack/react-query";
 import { meQuery } from "../auth/api.ts";
+import { blocksKey } from "../editor/api.ts";
 import { mutationKeys } from "../sync/apply-change.ts";
 import { t } from "../../i18n/index.ts";
 import { listKey, listsApi, listsKey, sidebarKey } from "./api.ts";
@@ -112,6 +114,9 @@ export function useCreateList() {
       };
       qc.setQueryData<ListIndexItem[]>(listsKey, (old) => upsertList(old ?? [], list));
       qc.setQueryData(listKey(v.id), list);
+      // A new list has no blocks: the editor can open at once (and Enter in the title can move
+      // into its first block) without waiting for a fetch.
+      qc.setQueryData<Block[]>(blocksKey(v.id), []);
       if (v.sectionId && v.position) {
         const entry: SidebarEntry = {
           listId: v.id,

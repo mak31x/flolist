@@ -60,6 +60,12 @@
   --color-avatar-5: var(--avatar-5);
   --color-avatar-6: var(--avatar-6);
   --color-on-avatar: var(--on-avatar);
+  --color-divider-gray: var(--divider-gray);
+  --color-divider-red: var(--divider-red);
+  --color-divider-orange: var(--divider-orange);
+  --color-divider-green: var(--divider-green);
+  --color-divider-blue: var(--divider-blue);
+  --color-divider-purple: var(--divider-purple);
 
   --shadow-popover: var(--shadow-popover);
   --shadow-lifted: var(--shadow-lifted);

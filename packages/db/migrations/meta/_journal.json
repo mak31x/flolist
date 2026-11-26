@@ -29,6 +29,13 @@
       "when": 1795639971588,
       "tag": "0003_lists_sidebar_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795661847465,
+      "tag": "0004_blocks",
+      "breakpoints": true
     }
   ]
 }
