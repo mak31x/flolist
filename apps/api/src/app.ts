@@ -6,13 +6,15 @@ import { HTTPException } from "hono/http-exception";
 import { requestId } from "hono/request-id";
 import type { Logger } from "pino";
 import { CLIENT_IP_HEADER, type Auth } from "./auth/auth.ts";
-import { ApiException, errorResponse } from "./lib/errors.ts";
+import { ApiException, errorResponse, unauthenticated } from "./lib/errors.ts";
 import { silentLogger } from "./lib/logger.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
 import { originCheck } from "./middleware/origin-check.ts";
 import { requestLog } from "./middleware/request-log.ts";
 import { fileRoutes, uploadRoutes, type FileRoutesOptions } from "./routes/files.ts";
+import { listRoutes } from "./routes/lists.ts";
 import { meRoutes } from "./routes/me.ts";
+import { sectionRoutes, sidebarRoutes } from "./routes/sidebar.ts";
 import type { Storage } from "./storage/storage.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
 import { noUser, type AppEnv, type ResolveUser } from "./types.ts";
@@ -45,6 +47,8 @@ export interface AppDeps {
   directUpload?: boolean;
   /** Upload reservations per user (default 30 per minute). */
   uploadRateLimit?: { limit: number; windowMs: number };
+  /** Runs after every committed mutation; the server passes the outbox drainer's `kick`. */
+  afterMutation?: () => void;
 }
 
 /** Auth endpoints that send email or check a password get the stricter limit. */
@@ -69,6 +73,7 @@ export function createApp(deps: AppDeps = {}) {
   app.use(requestLog(logger));
   app.use("/api/*", async (c, next) => {
     if (db) c.set("db", db);
+    c.set("afterMutation", deps.afterMutation);
     // Better Auth reads its own session on /api/auth; don't look it up twice.
     const isAuthRoute = c.req.path.startsWith("/api/auth/");
     c.set("user", isAuthRoute ? null : await resolveUser(c.req.raw));
@@ -113,6 +118,11 @@ export function createApp(deps: AppDeps = {}) {
     });
   }
 
+  // Every /api/v1 route needs a signed-in user; answer 401 before validation runs.
+  app.use("/api/v1/*", async (c, next) => {
+    if (!c.get("user")) throw unauthenticated();
+    await next();
+  });
   if (deps.appUrl) app.use("/api/v1/*", originCheck(new URL(deps.appUrl).origin));
 
   app.get("/api/health", (c) => {
@@ -136,6 +146,9 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/api/v1/uploads", uploadRoutes(files));
   app.route("/api/v1/files", fileRoutes(files));
   app.route("/api/v1/workspaces", workspaceRoutes);
+  app.route("/api/v1/lists", listRoutes);
+  app.route("/api/v1/sections", sectionRoutes);
+  app.route("/api/v1/sidebar", sidebarRoutes);
 
   app.notFound((c) => errorResponse(c, "NOT_FOUND", "Route not found"));
 

@@ -7,6 +7,9 @@ import { createAuth, sessionResolver } from "./auth/auth.ts";
 import { createSmtpMailer } from "./email/mailer.ts";
 import { loadEnv, s3ConfigFrom } from "./env.ts";
 import { createLogger } from "./lib/logger.ts";
+import { Hub } from "./realtime/hub.ts";
+import { createOutboxDrainer } from "./realtime/outbox.ts";
+import { mountRealtime } from "./realtime/ws.ts";
 import { createS3Storage } from "./storage/storage.ts";
 
 const env = loadEnv();
@@ -42,11 +45,16 @@ const auth = createAuth({
   google,
 });
 
+const hub = new Hub();
+const outbox = createOutboxDrainer(database.db, hub, logger);
+const resolveUser = sessionResolver(auth);
+
 const app = createApp({
   db: database.db,
   logger,
   auth,
-  resolveUser: sessionResolver(auth),
+  resolveUser,
+  afterMutation: outbox.kick,
   appUrl: env.APP_URL,
   googleSignIn: google !== undefined,
   rateLimit: { limit: env.RATE_LIMIT_MAX, windowMs: env.RATE_LIMIT_WINDOW_MS },
@@ -63,12 +71,24 @@ const app = createApp({
   uploadRateLimit: { limit: env.UPLOAD_RATE_LIMIT_MAX, windowMs: env.UPLOAD_RATE_LIMIT_WINDOW_MS },
 });
 
+const realtime = mountRealtime(app, {
+  db: database.db,
+  hub,
+  resolveUser,
+  logger,
+  appUrl: env.APP_URL,
+});
+
 const server = serve({ fetch: app.fetch, hostname: env.API_HOST, port: env.API_PORT }, (info) => {
   logger.info(`listening on http://${info.address}:${info.port}`);
 });
+realtime.injectWebSocket(server);
+outbox.start();
 
 function shutdown(signal: string) {
   logger.info(`${signal} received, shutting down`);
+  outbox.stop();
+  realtime.close();
   server.close(() => {
     void database.close().finally(() => process.exit(0));
   });

@@ -16,11 +16,11 @@ import { SignupView } from "./features/auth/components/SignupView.tsx";
 import { VerifyEmailView } from "./features/auth/components/VerifyEmailView.tsx";
 import type { PanelMode } from "./shell/RightPanel.tsx";
 import { AppShell } from "./shell/AppShell.tsx";
+import { AllListsPage } from "./features/lists/AllListsPage.tsx";
+import { ListPage } from "./features/lists/ListPage.tsx";
 import {
-  AllListsView,
   AllTasksView,
   InboxView,
-  ListView,
   NotFoundView,
   SettingsView,
   TeamView,
@@ -168,17 +168,17 @@ const updatesRoute = createRoute({
 const allListsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/all-lists",
-  component: AllListsView,
+  component: AllListsPage,
 });
 const listRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/lists/$listId",
-  component: ListView,
+  component: ListPage,
 });
 const taskRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/lists/$listId/tasks/$taskId",
-  component: ListView,
+  component: ListPage,
 });
 const teamRoute = createRoute({
   getParentRoute: () => appRoute,

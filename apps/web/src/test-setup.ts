@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { FakeSocket } from "./test-socket.ts";
 
 /** matchMedia that understands (min-width)/(max-width) against window.innerWidth; everything else is false. */
 function matches(query: string): boolean {
@@ -34,6 +35,8 @@ vi.stubGlobal(
   },
 );
 vi.stubGlobal("scrollTo", () => undefined);
+// The app's live-sync socket never touches the network in tests.
+vi.stubGlobal("WebSocket", FakeSocket);
 for (const name of ["scrollIntoView", "hasPointerCapture", "releasePointerCapture"] as const) {
   Object.defineProperty(Element.prototype, name, {
     value: () => false,
@@ -44,5 +47,6 @@ for (const name of ["scrollIntoView", "hasPointerCapture", "releasePointerCaptur
 
 afterEach(() => {
   cleanup();
+  FakeSocket.reset();
   localStorage.clear();
 });

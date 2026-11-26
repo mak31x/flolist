@@ -297,6 +297,40 @@ Decision:
 - `useUpdateMe(errorMessage)` is the one optimistic profile mutation (cache patch → PATCH → rollback + toast); `useSaveTheme` stays for the theme store. `workspacesQuery` is the client's workspace list.
 - `SettingsCard` lives in `apps/web/src/views/SettingsCard.tsx`; Avatar gains a 72px size.
 
+## D-040 — Libraries pinned in M2.1  (2026-11-26 · Accepted)
+Decision: **fractional-indexing 4.0.0** (packages/shared positions), **@hono/node-ws 1.3.2** (API WebSocket), **ws 8.23.0** + **@types/ws 8.18.2** (API dev, test client), **@dnd-kit/core 6.3.1**, **@dnd-kit/sortable 10.0.0**, **@dnd-kit/utilities 3.2.2**, **frimousse 0.4.0** (emoji picker), **emojibase-data 18.0.0** (web dev dependency, self-hosted picker data), **zod 4.6.7** in apps/web (same as shared).
+Consequences: frimousse fetches its data from `/emojibase/en/{data,messages}.json`, served by a small Vite plugin in dev and emitted into the build, so there's no jsDelivr request and the picker works offline inside Tauri/Capacitor.
+
+## D-041 — Positions are fractional-indexing keys  (2026-11-26 · Accepted)
+Decision: `position` values are fractional-indexing base-62 keys (`a0`, `a0V`…), validated by `positionSchema` (alphanumeric, ≤128 chars, must parse). They compare byte-wise: SQL orders with `collate "C"`, JS with `compareKeys`. Helpers in packages/shared: `positionBetween` (tolerates equal neighbours), `positionAfter/Before`, `positionsBetween`, `positionAt(siblings, index)`, `byPosition`. Clients compute positions; the server only validates them.
+Consequences: no reindexing ever (CLAUDE.md rule). Two clients inserting at the same gap can produce equal keys; ties break by id and the next move separates them.
+
+## D-042 — Mutations, idempotency and the outbox  (2026-11-26 · Accepted)
+Decision:
+- Every mutating route runs inside `runMutation(c, clientMutationId, fn)`: one transaction inserts `applied_mutations(user_id, client_mutation_id)` first, runs the change, stores `{status, body}`, and commits. A retry with the same id replays the stored response (even for DELETE); a concurrent duplicate waits on the PK and then replays. A failed mutation rolls back its row, so the id can be reused.
+- `emit(channels, change)` writes an `outbox` row in the same transaction (transactional outbox). After commit `afterMutation` kicks an in-process drainer that publishes pending rows in id order (`for update skip locked`, batches of 500) and marks them dispatched; a 5 s sweep catches anything a crash left. Delivery is at-least-once; clients apply by version.
+- Pruning (hourly): dispatched outbox rows after 1 h, applied mutations after 24 h.
+- Change events carry `clientMutationId`, so a client can tell its own echoes. List events go to `user:<creator>` + `list:<rootId>`; section and sidebar-entry events to `user:<id>` only.
+- `/api/v1/*` rejects signed-out requests with 401 before body validation.
+Alternatives: LISTEN/NOTIFY (only needed for multiple nodes, architecture.md); publishing straight from handlers (loses events when a commit fails or the process dies).
+
+## D-043 — WebSocket protocol v1  (2026-11-26 · Accepted)
+Decision:
+- `/ws` authenticates like REST (`resolveUser`), refuses an Origin other than `APP_URL` (403), caps client messages at 4 KB and pings every 30 s (a socket that misses one pong is dropped).
+- On open the server joins `user:<id>` and every `workspace:<id>` the user belongs to, then sends `{type:"ready", channels}`. Clients send `subscribe`/`unsubscribe` for `list:<id>` (checked with `authorize(list.view)`, answered `subscribed` or `error`) and `ping`. At most 500 channels per socket.
+- Client (`features/sync`): one `LiveSocket` with backoff reconnect; list channels are ref-counted via `useListChannel`; on reconnect it rejoins and refetches active queries. `applyChange` patches the TanStack cache with a version guard and skips events for a query key that has a pending mutation; the mutation's `onSettled` invalidates once the last one finishes.
+- Field-level LWW: PATCH applies only the fields sent; `baseVersion` is accepted but not enforced yet.
+
+## D-044 — Lists and sidebar behaviour chosen in M2.1  (2026-11-26 · Accepted)
+Decision:
+- Until sharing (M7) a list is visible only to its creator and lives in the Personal workspace; the All lists "Shared" tab stays empty. List roles: `creator` only. New matrix actions `workspace.createList`, `list.view/edit/manage`, `section.view/update/delete` (the default section can't be deleted).
+- Each user has one default section "Favorites", created with the personal workspace (and lazily by `GET /sidebar`). It can be renamed `[assumption]`. A new list is starred at the end of Favorites (or the section it was created from). Deleting a section unpins its lists (they stay in All lists). Max 200 sections per user `[assumption]`.
+- Sidebar entries of soft-deleted lists are kept so a Trash restore brings them back; reads hide them. Deleting a list from its own page lands on All lists `[assumption]`.
+- "Last opened" (All lists sort) is `list_view_prefs.last_opened_at`, set by `POST /lists/:id/open`.
+- Context menus: section = Rename / New section below / Delete; entry = Open / Rename / Change emoji / Unstar / Delete. Duplicate (M2.3) and Leave (M7.2) come later. Quick create (sidebar "+" and the phone FAB) offers New list and New section; New task stays disabled until M3.
+- Drag: lists reorder by mouse, touch and keyboard, within and across sections; sections by mouse/touch only `[assumption]`, keyboard reorder is Backlog.
+- `activity_events` is deferred to the tasks/activity phases.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

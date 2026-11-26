@@ -11,6 +11,12 @@ type ShellState = {
   toggleSidebar: () => void;
   setCoverCollapsed: (collapsed: boolean) => void;
   setDrawerOpen: (open: boolean) => void;
+  /** A sidebar section or entry whose title is being edited in place. */
+  renaming: { kind: "section" | "list"; id: string } | null;
+  setRenaming: (renaming: { kind: "section" | "list"; id: string } | null) => void;
+  /** A freshly created list whose page should focus its title (lists-and-blocks.md → Lists). */
+  focusTitleOf: string | null;
+  setFocusTitleOf: (id: string | null) => void;
 };
 
 export const useShell = create<ShellState>()((set) => ({
@@ -25,5 +31,13 @@ export const useShell = create<ShellState>()((set) => ({
   },
   setDrawerOpen: (drawerOpen) => {
     set({ drawerOpen });
+  },
+  renaming: null,
+  setRenaming: (renaming) => {
+    set({ renaming });
+  },
+  focusTitleOf: null,
+  setFocusTitleOf: (focusTitleOf) => {
+    set({ focusTitleOf });
   },
 }));
