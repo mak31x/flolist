@@ -399,6 +399,42 @@ Decision: `POST /lists/:id/blocks/move-to {ids, targetListId}` (`list.edit` on b
 ## D-055 — Per-user list view settings (M2.3)  (2026-11-26 · Accepted)
 Decision: `GET/PATCH /lists/:id/prefs` (`list.view`; `runMutation`) on `list_view_prefs`; a `listPrefs` change event on `user:<id>` with `version` = `updated_at` in ms. The funnel menu offers Show tasks only, Hide completed tasks and the sorts that work so far (`AVAILABLE_LIST_SORTS`: Manual, Alphabetical); M3 adds the task-field sorts. `viewBlocks` renders the view without touching positions; Alphabetical sorts blocks by text until tasks exist, textless last `[assumption]`; a sorted view turns drag off and shows "Sorted by X · Reset"; ↑/↓ still follow stored order (Backlog). No new libraries in M2.3.
 
+## D-056 — Tasks storage, task blocks and the page batch (M3.1)  (2026-11-26 · Accepted)
+Decision:
+- Migration 0006: `tasks` (data-model columns needed now: workspace, `root_list_id`/`list_id` nullable for M4's Inbox-only tasks, `parent_task_id`, `title` + `title_inline` jsonb, completion, soft delete; dates/priority/assignee/source come with their phases), `activity_events`, `blocks.task_id` (unique, FK cascade; CHECK `(task_id is not null) = (type = 'task')`).
+- `task` is a text block type: its block content is the task's title (Tiptap inline, ≤ 2000 chars), mirrored into `tasks.title_inline` and plain `title` in the same transaction. Text ↔ task Turn into is allowed (content kept). The block DTO carries `taskId` and `task: {completedAt, completedBy}`; any task change bumps the block's version.
+- Subtasks are task blocks in a task's body (`container_type='task'`, `tasks.parent_task_id`, same home `list_id`), nested at most 4 levels (`MAX_SUBTASK_DEPTH`) `[assumption]`. A list *page* = the list's blocks + the bodies of tasks whose home is that list: `GET /lists/:id/blocks` returns all of them and the one batch route edits them (upsert `task: {id?, completed?}`, `container` on create, upsert and move; no cycles, no sublists inside tasks). No `/tasks/:id/blocks` routes.
+- Deleting a task block soft-deletes the task subtree and its body blocks with trash root = the block (restore by upserting the block); turning a task into text trashes the task the same way and turning it back with the same `task.id` restores it. `move-to` and Duplicate list carry tasks and bodies along (a duplicate keeps completion `[assumption]`).
+- Access: tasks have no matrix actions yet; `/tasks/:id` resolves through the home list (`list.view` / `list.edit`), missing or foreign = 404. `task` change events go to `list:<rootId>`. Tasks of a deleted list aren't trashed themselves (they're unreachable through the list; Backlog).
+Alternatives: title only on `tasks` with the block as a bare pointer (two write paths for the editor); per-task body routes and stores (two undo stacks and sync paths for one page).
+
+## D-057 — Task routes and the activity log (M3.1)  (2026-11-26 · Accepted)
+Decision: `GET /tasks/:id`, `PATCH /tasks/:id` (`titleInline`, `completed`; keeps the block content in step, emits block + task events) and `GET /tasks/:id/activity` (oldest first, actor name/avatar). Activity rows are written in the mutation's transaction for created, title_changed, completed, reopened and restored (an undo of a delete counts as restored). A title change by the same actor within 10 minutes of their last title change or the creation updates that entry instead of adding one `[assumption]`. Other actions are logged with their fields (M3.2+).
+
+## D-058 — Client: visible tree, shared store, task fields (M3.1)  (2026-11-26 · Accepted)
+Decision:
+- Editors render `visibleTree(blocks, root, collapsed)` (`editor/tree.ts`): the root container's blocks, each task followed by its subtasks (only task blocks of a body; text/media in a body show in the details panel `[assumption]`). New blocks take positions among same-container siblings (`placeNear`), never from visible neighbours; media and sublists anchored on a subtask go after its top-level task.
+- `BlockFields` gains `taskId` (made by the store when a block becomes a task; undo hands it back), `completed` and `container`; the store sends them as `task`/`container`. One store per list page, ref-counted and shared by the list and the details panel (`use-block-store.ts`); each editor keeps its own undo stack.
+- Live upserts of body blocks find their page by the cached block of the parent task (`pageOf`).
+- Task rows reuse the text-row layout (checkbox as the marker, progress ring + open arrow trailing), so Turn into keeps the title editor mounted and the caret in place. Collapsed subtasks are component state (Backlog: persist).
+- Completion sound: `platform.playCompleteSound()` synthesises two soft notes with Web Audio (no audio file) `[assumption: Superlist's sound not copied]`, played only when `me.soundsEnabled` (now on the `/me` DTO, read-only until M6.2). `ProgressRing` joins packages/ui.
+
+## D-059 — Task editing keys (M3.1)  (2026-11-26 · Accepted)
+Decision (`[assumption]` where Superlist is unchecked): `[]`/`[ ]` + space and slash → Task (first in the slash menu) make a task; Enter continues tasks, Enter on an empty top-level task makes it a paragraph. Tab makes a task the last subtask of the task directly above it (same container); Shift+Tab moves a subtask out to just below its parent, later siblings stay. Enter or Backspace at the start of an empty/nested subtask moves it out instead of turning it into text (as text it would vanish from the list). Mod+D completes/reopens (pulled from M3.3 so the checkbox is keyboard-reachable); Mod+Enter or the row's arrow opens details. Arrow keys skip rows hidden by the view's filters.
+
+## D-060 — Task details panel (M3.1)  (2026-11-26 · Accepted)
+Decision: `/lists/:listId/tasks/:taskId` (task id, home list) shows in the right panel (a sheet below 1024px): close + ⋮ (only Delete, with an Undo toast, until M3.3), "↳ parent" link for subtasks, large checkbox, title (one line; Enter → body, Esc → close), the list chip (navigates; moving is M3.3), the body (the list's BlockEditor rooted at `{type: "task", id}`), and the activity log with local-day separators and "time: text" lines. Chips for date/priority/labels/assignee and the composer come with their phases; no placeholders. A task that disappears closes the panel.
+
+## D-061 — List view with tasks, Mark all incomplete, checklists on the clipboard (M3.1)  (2026-11-26 · Accepted · extends D-055)
+Decision (orders `[assumption]`):
+- `viewBlocks(rows, prefs, depth, me)`: Show tasks only keeps task rows; Hide completed drops completed tasks with their subtasks; sorts reorder top-level rows and keep subtasks under them — Creator (yours first, then by creator), Creation date (newest first), Completed (open tasks and other blocks in stored order, then completed tasks, most recent first). `AVAILABLE_LIST_SORTS` adds creator, created, completed; priority/due/label come with M3.2, assignee with M7.3, source with M9.
+- Sublist rows show the open tasks of the sublist page (tasks and subtasks), read from its blocks query, which live sync keeps fresh.
+- ⋮ → Mark all incomplete reopens every completed task of the page (not sublists) as one ordinary batch, with an Undo toast; no extra route.
+- Clipboard: tasks write `- [ ] text` / `- [x] text` Markdown and `☐/☑` HTML paragraphs; Markdown checklists paste as tasks (flat), keeping completion. `BlockDraft.completed` carries it.
+
+## D-062 — "Getting started" list (M3.1)  (2026-11-26 · Accepted · settles D-036's deferral)
+Decision: `ensurePersonalWorkspace` (sign-up hook and every `GET /me`) claims `user_settings.getting_started_seeded_at` and, once only, creates "👋 Getting started" with an intro paragraph, a heading and task blocks describing what exists so far (one with a subtask), plus their activity, starred at the end of Favorites. Earlier accounts get it on their next `/me` (the backfill); a deleted copy never returns. Wording is Flolist's own `[assumption]`. No new libraries in M3.1.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

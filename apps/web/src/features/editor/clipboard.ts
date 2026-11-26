@@ -34,6 +34,7 @@ const draftsSchema = z.array(
       content: blockContentSchema,
       fileId: z.uuid().optional(),
       title: z.string().max(500).optional(),
+      completed: z.boolean().optional(),
     })
     .refine((d) => contentMatchesType(d.type, d.content))
     .refine((d) => !isMediaBlockType(d.type) || d.fileId !== undefined),
@@ -76,7 +77,7 @@ function parseJson(raw: string): BlockDraft[] | null {
 
 /**
  * What a paste holds, as blocks: our own JSON, else HTML from other apps, else the plain text
- * read as Markdown (Markdown checklists become bullets until tasks exist).
+ * read as Markdown (Markdown checklists become tasks).
  */
 export function readBlocks(data: DataTransfer): BlockDraft[] {
   const custom = data.getData(BLOCKS_MIME);

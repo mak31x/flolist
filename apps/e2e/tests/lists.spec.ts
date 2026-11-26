@@ -28,9 +28,12 @@ const sidebar = (page: Page) => page.getByRole("navigation", { name: "Main" });
 const section = (page: Page, title: string) =>
   sidebar(page).getByRole("region", { name: new RegExp(`^(Collapse|Expand) ${title}$`) });
 
-/** The titles of the lists in a sidebar section, top to bottom. */
+/** The seeded "Getting started" list every new account has (M3.1); the tests ignore it. */
+const SEEDED = "Getting started";
+
+/** The titles of the lists in a sidebar section, top to bottom (the seeded list left out). */
 const titlesIn = (page: Page, title: string) =>
-  section(page, title).getByRole("listitem").getByRole("link");
+  section(page, title).getByRole("listitem").getByRole("link").filter({ hasNotText: SEEDED });
 
 async function newList(page: Page, title: string) {
   await sidebar(page).getByRole("button", { name: "Create" }).click();
@@ -60,6 +63,10 @@ test("lists and sections persist, reorder and sync live between two windows", as
   await signUpVerified(page);
   const other = await secondWindow(browser, page);
   await expect(section(other, "Favorites")).toBeVisible();
+  // A new account starts with the Getting started list in Favorites.
+  await expect(
+    section(other, "Favorites").getByRole("link", { name: new RegExp(SEEDED) }),
+  ).toBeVisible();
 
   // Create two lists in window A: both appear, starred, in window B.
   await newList(page, "Groceries");
@@ -118,7 +125,7 @@ test("lists and sections persist, reorder and sync live between two windows", as
   await expect(titlesIn(other, "Favorites")).toHaveCount(0);
   await other.goto("/all-lists");
   const rows = other.getByRole("list", { name: "Lists" });
-  await expect(rows.getByRole("link")).toHaveText(["Groceries"]);
+  await expect(rows.getByRole("link").filter({ hasNotText: SEEDED })).toHaveText(["Groceries"]);
 
   await other.context().close();
 });

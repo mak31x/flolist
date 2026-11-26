@@ -21,6 +21,7 @@ import {
   positionAt,
   uuidv7,
   type Block,
+  type BlockContainer,
   type InlineNode,
   type MediaContent,
   DEFAULT_LIST_VIEW_PREFS,
@@ -58,6 +59,15 @@ import { filterSlashItems } from "./slash.ts";
 import { SlashMenu } from "./SlashMenu.tsx";
 import { useSlash } from "./use-slash.ts";
 import { useBlockStore } from "./use-block-store.ts";
+import { playCompleteSound } from "../../platform/index.ts";
+import {
+  ancestorIn,
+  childrenOf,
+  containerOf,
+  sameContainer,
+  subtaskProgress,
+  visibleTree,
+} from "./tree.ts";
 
 /** Where the pointer is now, for mouse and touch drags (keyboard drags only reorder). */
 function pointerOf(event: DragMoveEvent | DragEndEvent): { x: number; y: number } | null {
@@ -118,12 +128,12 @@ function markDropTarget(el: HTMLElement | null) {
 const docToInlineEmpty = (editor: Editor) => editor.state.doc.textContent.length === 0;
 
 /** A not-yet-saved empty paragraph shown in an empty list; typing into it creates it. */
-function phantomBlock(id: string, listId: string, rootListId: string): Block {
+function phantomBlock(id: string, root: BlockContainer, rootListId: string): Block {
   const now = new Date(0).toISOString();
   return {
     id,
-    containerType: "list",
-    containerId: listId,
+    containerType: root.type,
+    containerId: root.id,
     rootListId,
     position: positionAfter(null),
     type: "paragraph",
@@ -131,6 +141,8 @@ function phantomBlock(id: string, listId: string, rootListId: string): Block {
     content: { inline: [] },
     fileId: null,
     sublistId: null,
+    taskId: null,
+    task: null,
     createdBy: null,
     version: 0,
     createdAt: now,
@@ -147,9 +159,18 @@ export function BlockEditor({
   rootListId,
   onExitTop,
   view = DEFAULT_LIST_VIEW_PREFS,
+  root: rootProp,
+  onOpenTask,
+  placeholder,
 }: {
   listId: string;
   rootListId: string;
+  /** What this editor shows: the list (default), or one task's body (details panel). */
+  root?: BlockContainer;
+  /** Opens a task's details (the row's arrow, Mod+Enter). */
+  onOpenTask?: (block: Block) => void;
+  /** The empty editor's placeholder text. */
+  placeholder?: string;
   /** The caller's filter/sort settings; a sorted view can't be reordered by drag. */
   view?: ListViewPrefs;
   /** ↑ from the first block (the page moves focus to the list title). */
@@ -163,24 +184,43 @@ export function BlockEditor({
   const [phantomId, setPhantomId] = useState(uuidv7);
   const [link, setLink] = useState<LinkRequest | null>(null);
 
+  const rootType = rootProp?.type ?? "list";
+  const rootId = rootProp?.id ?? listId;
+  const root = useMemo<BlockContainer>(() => ({ type: rootType, id: rootId }), [rootType, rootId]);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const collapsedRef = useRef(collapsed);
+  const viewRef = useRef(view);
+
   if (blocks?.some((b) => b.id === phantomId)) {
     // The placeholder block became real; the next empty list gets a fresh one.
     setPhantomId(uuidv7());
   }
 
+  const tree = useMemo(
+    () => (blocks ? visibleTree(blocks, root, collapsed) : null),
+    [blocks, root, collapsed],
+  );
+  const empty = tree?.rows.length === 0;
   const rows = useMemo(() => {
-    if (!blocks) return null;
-    return blocks.length > 0 ? blocks : [phantomBlock(phantomId, listId, rootListId)];
-  }, [blocks, phantomId, listId, rootListId]);
+    if (!tree) return null;
+    return tree.rows.length > 0 ? tree.rows : [phantomBlock(phantomId, root, rootListId)];
+  }, [tree, phantomId, root, rootListId]);
   const numbers = useMemo(() => numberedLabels(rows ?? []), [rows]);
-  const shown = useMemo(() => (rows ? viewBlocks(rows, view) : []), [rows, view]);
+  const shown = useMemo(
+    () => (rows ? viewBlocks(rows, view, tree?.depth, me.id) : []),
+    [rows, view, tree, me.id],
+  );
   const sorted = isSorted(view);
 
   const rowsRef = useRef<readonly Block[]>([]);
   const exitTop = useRef(onExitTop);
+  const openTaskRef = useRef(onOpenTask);
   useLayoutEffect(() => {
     rowsRef.current = rows ?? [];
     exitTop.current = onExitTop;
+    openTaskRef.current = onOpenTask;
+    collapsedRef.current = collapsed;
+    viewRef.current = view;
   });
   const ctxRef = useRef<KeyContext | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -193,6 +233,7 @@ export function BlockEditor({
   const [ctx] = useState<KeyContext>(() => ({
     listId,
     rootListId,
+    root,
     qc,
     workspaceId: async () => {
       // A just-created list is cached before the server has named its workspace.
@@ -205,7 +246,16 @@ export function BlockEditor({
     },
     // The store's blocks are current the moment a command applies; rendered rows may lag a
     // frame. Only an empty list's placeholder comes from the rendered rows.
-    rows: () => (store.blocks.length > 0 ? store.blocks : rowsRef.current),
+    rows: () => {
+      const tree = visibleTree(store.blocks, root, collapsedRef.current);
+      if (tree.rows.length === 0) return rowsRef.current;
+      // Rows hidden by the view's filters are skipped (arrows still follow stored order).
+      return viewBlocks(tree.rows, { ...viewRef.current, sort: "manual" }, tree.depth);
+    },
+    all: () => store.blocks,
+    openTask: (block) => {
+      openTaskRef.current?.(block);
+    },
     isSaved: (id) => store.get(id) !== undefined,
     commands: new EditorCommands(store),
     focusTitle: () => {
@@ -256,6 +306,7 @@ export function BlockEditor({
                   position: block.position,
                   indent: block.indent,
                   content: { inline },
+                  ...(block.containerType === "task" ? { container: containerOf(block) } : {}),
                 },
           },
         ],
@@ -320,6 +371,7 @@ export function BlockEditor({
       indent: b.indent,
       content: b.content,
       ...(b.fileId ? { fileId: b.fileId } : {}),
+      ...(b.task ? { completed: b.task.completedAt !== null } : {}),
       ...(b.sublistId
         ? {
             title: qc.getQueryData<{ title: string } | null>(listQuery(b.sublistId).queryKey)
@@ -327,6 +379,25 @@ export function BlockEditor({
           }
         : {}),
     }));
+  const onComplete = useCallback(
+    (block: Block, completed: boolean) => {
+      if (!store.get(block.id)) return;
+      ctx.commands.run([{ op: "upsert", id: block.id, fields: { completed } }]);
+      if (completed && me.soundsEnabled) playCompleteSound();
+    },
+    [ctx, store, me.soundsEnabled],
+  );
+  const onCollapse = useCallback((block: Block) => {
+    setCollapsed((old) => {
+      const next = new Set(old);
+      if (next.has(block.id)) next.delete(block.id);
+      else next.add(block.id);
+      return next;
+    });
+  }, []);
+  const openTask = useCallback((block: Block) => {
+    openTaskRef.current?.(block);
+  }, []);
   const onAction = useCallback(
     (block: Block, action: BlockAction) => {
       blockAction(ctx, block, action);
@@ -363,12 +434,30 @@ export function BlockEditor({
         return;
       }
       if (!over || active.id === over.id) return;
-      const current = store.blocks;
-      const newIndex = current.findIndex((b) => b.id === over.id);
-      if (newIndex === -1) return;
-      const others = current.filter((b) => b.id !== active.id);
+      const all = store.blocks;
+      const moving = store.get(String(active.id));
+      const overRow = store.get(String(over.id));
+      if (!moving || !overRow) return;
+      // A task can land among another container's subtasks; other blocks stay in their own
+      // container, next to the over row's ancestor there.
+      const reference =
+        moving.type === "task" || sameContainer(containerOf(moving), overRow)
+          ? overRow
+          : ancestorIn(all, containerOf(moving), overRow);
+      if (!reference || reference.id === moving.id) return;
+      const dest = containerOf(reference);
+      const siblings = childrenOf(all, dest).filter((b) => b.id !== moving.id);
+      const visible = ctx.rows();
+      const down =
+        visible.findIndex((b) => b.id === moving.id) < visible.findIndex((b) => b.id === over.id);
+      const index = siblings.findIndex((b) => b.id === reference.id) + (down ? 1 : 0);
+      const moved = !sameContainer(dest, moving);
       ctx.commands.run([
-        { op: "upsert", id: String(active.id), fields: { position: positionAt(others, newIndex) } },
+        {
+          op: "upsert",
+          id: moving.id,
+          fields: { position: positionAt(siblings, index), ...(moved ? { container: dest } : {}) },
+        },
       ]);
     },
     [ctx, store, listId],
@@ -462,14 +551,20 @@ export function BlockEditor({
             <BlockRow
               key={block.id}
               block={block}
-              saved={blocks?.length !== 0}
+              saved={!empty}
+              depth={tree?.depth.get(block.id)}
+              progress={block.taskId && blocks ? subtaskProgress(blocks, block.taskId) : undefined}
+              collapsed={collapsed.has(block.id)}
+              onCollapse={onCollapse}
+              onComplete={onComplete}
+              onOpenTask={onOpenTask ? openTask : undefined}
               draggable={!sorted}
               selected={selectedIds.has(block.id)}
               onPaste={onPaste}
               onHistory={onHistory}
               onAction={onAction}
               number={numbers.get(block.id)}
-              placeholder={onlyEmpty ? t("editor.placeholder") : undefined}
+              placeholder={onlyEmpty ? (placeholder ?? t("editor.placeholder")) : undefined}
               onChange={onChange}
               onKeyDown={onKeyDown}
               onDividerKeyDown={onDividerKeyDown}

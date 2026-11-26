@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { blockSchema } from "./blocks.ts";
+import { taskSchema } from "./tasks.ts";
 import { listSchema, listViewPrefsSchema, sectionSchema, sidebarEntrySchema } from "./lists.ts";
 
 /**
@@ -50,6 +51,14 @@ export const changeEventSchema = z.union([
   z.object({
     ...changeBase,
     op: z.literal("upsert"),
+    /** A task's own fields (the details panel); its block event carries what rows show. */
+    entity: z.literal("task"),
+    id: z.uuid(),
+    data: taskSchema,
+  }),
+  z.object({
+    ...changeBase,
+    op: z.literal("upsert"),
     /** The user's view settings for one list (`user:<id>` only); `version` = updatedAt in ms. */
     entity: z.literal("listPrefs"),
     /** The list id. */
@@ -59,7 +68,7 @@ export const changeEventSchema = z.union([
   z.object({
     ...changeBase,
     op: z.literal("delete"),
-    entity: z.enum(["list", "section", "sidebarEntry", "block"]),
+    entity: z.enum(["list", "section", "sidebarEntry", "block", "task"]),
     id: z.uuid(),
   }),
 ]);

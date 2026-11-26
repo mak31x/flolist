@@ -66,6 +66,7 @@ describe("GET /api/v1/me", () => {
       locale: "system",
       timezone: "UTC",
       weekStart: "system",
+      soundsEnabled: true,
     });
   });
 });

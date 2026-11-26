@@ -15,9 +15,11 @@ import { user } from "./auth.ts";
 import { createdAt, id, updatedAt, version } from "./columns.ts";
 import { files } from "./files.ts";
 import { lists } from "./lists.ts";
+import { tasks } from "./tasks.ts";
 
 /** Block types built so far; the API checks these equal `BLOCK_TYPES` in packages/shared. */
 export const blockTypes = [
+  "task",
   "paragraph",
   "heading1",
   "heading2",
@@ -46,7 +48,7 @@ const positionText = customType<{ data: string }>({
 /**
  * One block of a list or task body (D-007, data-model.md → Blocks). `root_list_id` is the root
  * list whose access and `list:<rootId>` channel apply. Image/attachment blocks point at a file,
- * sublist blocks at their child list (one block per list); the task reference arrives in M3.1.
+ * sublist blocks at their child list (one block per list), task blocks at their task.
  * Soft-deleted rows keep `trash_root_id`.
  */
 export const blocks = pgTable(
@@ -66,6 +68,9 @@ export const blocks = pgTable(
     sublistId: uuid("sublist_id")
       .unique()
       .references((): AnyPgColumn => lists.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .unique()
+      .references((): AnyPgColumn => tasks.id, { onDelete: "cascade" }),
     createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
     version: version(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -89,7 +94,7 @@ export const blocks = pgTable(
     index("blocks_file_id_idx").on(t.fileId),
     check(
       "blocks_reference_check",
-      sql`(${t.fileId} is null or ${t.type} in ('image', 'attachment')) and ((${t.sublistId} is not null) = (${t.type} = 'sublist'))`,
+      sql`(${t.fileId} is null or ${t.type} in ('image', 'attachment')) and ((${t.sublistId} is not null) = (${t.type} = 'sublist')) and ((${t.taskId} is not null) = (${t.type} = 'task'))`,
     ),
   ],
 );

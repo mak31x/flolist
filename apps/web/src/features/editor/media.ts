@@ -19,7 +19,8 @@ import { pickFile } from "../../platform/index.ts";
 import { blocksApi, blocksKey } from "./api.ts";
 import { sortBlocks } from "./cache.ts";
 import type { KeyContext } from "./keyboard.ts";
-import type { LocalOp } from "./store.ts";
+import type { BlockFields, LocalOp } from "./store.ts";
+import { ancestorIn, childrenOf, placeNear, positionAtEnd, withDescendants } from "./tree.ts";
 
 /**
  * Image, attachment and sublist blocks (lists-and-blocks.md → Block types). Media blocks are
@@ -87,13 +88,21 @@ function replaceOps(ctx: KeyContext, anchor: Block | null, replace: boolean): Lo
   return current && isEmptyParagraph(current) ? [{ op: "delete", id: anchor.id }] : [];
 }
 
-/** A position right after `afterId` (or at the top), before whatever follows it now. */
-function positionAfterRow(ctx: KeyContext, afterId: string | null): string {
-  const rows = ctx.rows().filter((b) => ctx.isSaved(b.id));
-  const index = afterId ? rows.findIndex((b) => b.id === afterId) : -1;
-  const before = index >= 0 ? rows[index] : afterId ? rows.at(-1) : undefined;
-  const next = index >= 0 ? rows[index + 1] : afterId ? undefined : rows[0];
-  return positionBetween(before?.position ?? null, next?.position ?? null);
+/**
+ * Where a block goes right after `afterId` (or at the top), before whatever follows it now. A
+ * subtask anchor places it after its top task instead, since media and sublists live in the
+ * editor's own container.
+ */
+function placeAfterRow(ctx: KeyContext, afterId: string | null): BlockFields {
+  const all = ctx.all();
+  const anchor = afterId ? all.find((b) => b.id === afterId) : undefined;
+  const inRoot = anchor ? ancestorIn(all, ctx.root, anchor) : undefined;
+  if (inRoot) return placeNear(all, inRoot, "after");
+  const first = childrenOf(all, ctx.root)[0];
+  const position = afterId
+    ? positionAtEnd(all, ctx.root)
+    : positionBetween(null, first?.position ?? null);
+  return ctx.root.type === "list" ? { position } : { position, container: ctx.root };
 }
 
 /**
@@ -144,7 +153,7 @@ export async function insertFiles(
         id,
         fields: {
           type: kind,
-          position: positionAfterRow(ctx, afterId),
+          ...placeAfterRow(ctx, afterId),
           indent: 0,
           fileId: uploaded.id,
           content: {
@@ -200,7 +209,7 @@ export function insertSublist(ctx: KeyContext, anchor: Block | null, replace: bo
       id,
       fields: {
         type: "sublist",
-        position: positionAfterRow(ctx, anchor?.id ?? null),
+        ...placeAfterRow(ctx, anchor?.id ?? null),
         indent: 0,
         content: {},
         sublistId,
@@ -265,7 +274,9 @@ export async function moveBlocksTo(
   try {
     await ctx.commands.flush();
     const before = ctx.qc.getQueryData<Block[]>(source);
-    ctx.qc.setQueryData<Block[]>(source, (old) => old?.filter((b) => !ids.includes(b.id)));
+    // Tasks take their subtasks and bodies along.
+    const leaving = withDescendants(before ?? [], ids);
+    ctx.qc.setQueryData<Block[]>(source, (old) => old?.filter((b) => !leaving.has(b.id)));
     ctx.commands.clear();
     try {
       const result = await blocksApi.moveTo(ctx.listId, {

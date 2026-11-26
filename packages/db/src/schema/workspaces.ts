@@ -83,6 +83,8 @@ export const userSettings = pgTable(
       .default({}),
     dailyPlanningTime: time("daily_planning_time"),
     digest: text("digest", { enum: digestFrequencies }).notNull().default("off"),
+    /** When the "Getting started" list was seeded (M3.1); null = not yet, so it's backfilled. */
+    gettingStartedSeededAt: timestamp("getting_started_seeded_at", { withTimezone: true }),
     updatedAt: updatedAt(),
     version: version(),
   },

@@ -8,8 +8,12 @@ import { clientMutationSchema } from "./lists.ts";
  * editor can load and save it without conversion.
  */
 
-/** Block types built so far. `task` arrives with M3.1. */
+/**
+ * Blocks with inline text (each mounts an inline editor). A `task` block is one of them: its
+ * content is the task's title, and it also points at a `tasks` row (`taskId`, D-056).
+ */
 export const TEXT_BLOCK_TYPES = [
+  "task",
   "paragraph",
   "heading1",
   "heading2",
@@ -39,6 +43,10 @@ export function isTextBlockType(type: BlockType): type is TextBlockType {
 export type MediaBlockType = (typeof MEDIA_BLOCK_TYPES)[number];
 export function isMediaBlockType(type: BlockType): type is MediaBlockType {
   return type === "image" || type === "attachment";
+}
+
+export function isTaskBlockType(type: BlockType): type is "task" {
+  return type === "task";
 }
 
 /**
@@ -161,6 +169,20 @@ export function contentMatchesType(type: BlockType, content: BlockContent): bool
 export const containerTypeSchema = z.enum(["list", "task"]);
 export type ContainerType = z.infer<typeof containerTypeSchema>;
 
+/**
+ * Where a block lives: a list, or a task's body (subtasks and the task's notes). A list page
+ * loads its own blocks plus the bodies of its tasks, so subtasks can render nested.
+ */
+export const blockContainerSchema = z.strictObject({ type: containerTypeSchema, id: z.uuid() });
+export type BlockContainer = z.infer<typeof blockContainerSchema>;
+
+/** What a task block shows about its task, besides the title. */
+export const blockTaskSchema = z.object({
+  completedAt: z.iso.datetime().nullable(),
+  completedBy: z.uuid().nullable(),
+});
+export type BlockTask = z.infer<typeof blockTaskSchema>;
+
 export const blockSchema = z.object({
   id: z.uuid(),
   containerType: containerTypeSchema,
@@ -174,6 +196,10 @@ export const blockSchema = z.object({
   fileId: z.uuid().nullable(),
   /** The child list of a sublist block. */
   sublistId: z.uuid().nullable(),
+  /** The task of a task block (its title is the block's content). */
+  taskId: z.uuid().nullable(),
+  /** Task blocks: the task's state, filled by the server from the `tasks` row. */
+  task: blockTaskSchema.nullable(),
   createdBy: z.uuid().nullable(),
   version: z.number().int(),
   createdAt: z.iso.datetime(),
@@ -209,6 +235,16 @@ export const upsertBlockOpSchema = z.object({
    * creates the list with the block, in the same transaction.
    */
   sublist: z.object({ id: z.uuid(), title: z.string().max(500) }).optional(),
+  /**
+   * Task blocks. `id` is the client-made task id, required when the block becomes a task (on
+   * create, or when a text block is turned into one); `completed` completes or reopens it.
+   */
+  task: z.object({ id: z.uuid().optional(), completed: z.boolean().optional() }).optional(),
+  /**
+   * The container: on create (default: the list itself), or a new one for an existing block.
+   * It must be the list, or the body of a task that lives in it.
+   */
+  container: blockContainerSchema.optional(),
   /** The version the client last saw (accepted, not enforced yet; D-043). */
   baseVersion: z.number().int().positive().optional(),
 });
@@ -220,6 +256,8 @@ export const moveBlockOpSchema = z.object({
   position: positionSchema,
   /** A new indent level, for drags that change nesting. */
   indent: indentSchema.optional(),
+  /** A new container in the same list: Tab / Shift+Tab on a task makes it a subtask or not. */
+  container: blockContainerSchema.optional(),
 });
 export type MoveBlockOp = z.infer<typeof moveBlockOpSchema>;
 

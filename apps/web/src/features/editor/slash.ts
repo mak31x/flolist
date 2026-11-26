@@ -8,11 +8,9 @@ export interface SlashItem {
   aliases: readonly string[];
 }
 
-/**
- * The slash menu, in the order lists-and-blocks.md gives. Task joins it with M3.1; nothing is
- * listed before it works.
- */
+/** The slash menu, in the order lists-and-blocks.md gives. */
 export const SLASH_ITEMS: readonly SlashItem[] = [
+  { type: "task", label: "editor.type.task", aliases: ["todo", "checkbox", "[]"] },
   { type: "sublist", label: "editor.type.sublist", aliases: ["list", "page", "child"] },
   { type: "paragraph", label: "editor.type.paragraph", aliases: ["text", "p"] },
   { type: "heading1", label: "editor.type.heading1", aliases: ["h1", "title"] },
@@ -51,6 +49,9 @@ export function markdownShortcut(prefix: string): BlockType | null {
       return "bullet";
     case ">":
       return "quote";
+    case "[]":
+    case "[ ]":
+      return "task";
     default:
       return /^\d{1,9}[.)]$/.test(prefix) ? "numbered" : null;
   }

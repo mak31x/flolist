@@ -16,6 +16,7 @@ import { blockRoutes } from "./routes/blocks.ts";
 import { listRoutes } from "./routes/lists.ts";
 import { meRoutes } from "./routes/me.ts";
 import { sectionRoutes, sidebarRoutes } from "./routes/sidebar.ts";
+import { taskRoutes } from "./routes/tasks.ts";
 import type { Storage } from "./storage/storage.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
 import { noUser, type AppEnv, type ResolveUser } from "./types.ts";
@@ -149,6 +150,7 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/api/v1/workspaces", workspaceRoutes);
   app.route("/api/v1/lists", listRoutes);
   app.route("/api/v1/lists", blockRoutes);
+  app.route("/api/v1/tasks", taskRoutes);
   app.route("/api/v1/sections", sectionRoutes);
   app.route("/api/v1/sidebar", sidebarRoutes);
 

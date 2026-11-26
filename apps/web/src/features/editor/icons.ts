@@ -10,11 +10,13 @@ import {
   Paperclip,
   Pilcrow,
   Quote,
+  SquareCheck,
   type LucideIcon,
 } from "lucide-react";
 
 /** One icon per block type (slash menu, block-type button). */
 export const BLOCK_ICONS: Record<string, LucideIcon> = {
+  task: SquareCheck,
   paragraph: Pilcrow,
   heading1: Heading1,
   heading2: Heading2,

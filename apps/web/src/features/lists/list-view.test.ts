@@ -1,6 +1,6 @@
 import { DEFAULT_LIST_VIEW_PREFS, textInline, type Block } from "@flolist/shared";
 import { describe, expect, it } from "vitest";
-import { viewBlocks } from "./list-view.ts";
+import { openTaskCount, viewBlocks } from "./list-view.ts";
 
 const block = (id: string, text: string | null, type: Block["type"] = "paragraph"): Block => ({
   id,
@@ -13,6 +13,8 @@ const block = (id: string, text: string | null, type: Block["type"] = "paragraph
   content: text === null ? { color: "gray" } : { inline: textInline(text) },
   fileId: null,
   sublistId: null,
+  taskId: null,
+  task: null,
   createdBy: null,
   version: 1,
   createdAt: "",
@@ -38,7 +40,63 @@ describe("viewBlocks", () => {
     expect(rows.map((b) => b.id)).toEqual(["1", "2", "3", "4", "5"]);
   });
 
-  it("shows only tasks when asked (none exist before M3.1)", () => {
+  it("shows only tasks when asked", () => {
     expect(viewBlocks(rows, { ...DEFAULT_LIST_VIEW_PREFS, tasksOnly: true })).toEqual([]);
+  });
+});
+
+describe("viewBlocks with tasks", () => {
+  const task = (id: string, text: string, over: Partial<Block> = {}): Block => ({
+    ...block(id, text, "task"),
+    taskId: `t${id}`,
+    task: { completedAt: null, completedBy: null },
+    ...over,
+  });
+  const done = (at: string) => ({ task: { completedAt: at, completedBy: "me" } });
+  const rows = [
+    task("1", "Write", { createdAt: "2026-11-01", createdBy: "other" }),
+    task("2", "sub of write", done("2026-11-03T00:00:00Z")),
+    block("3", "notes"),
+    task("4", "Call", {
+      ...done("2026-11-02T00:00:00Z"),
+      createdAt: "2026-11-03",
+      createdBy: "me",
+    }),
+    task("5", "sub of call"),
+    task("6", "Buy", { ...done("2026-11-05T00:00:00Z"), createdAt: "2026-11-02" }),
+  ];
+  const depth = new Map([
+    ["2", 1],
+    ["5", 1],
+  ]);
+  const ids = (out: readonly Block[]) => out.map((b) => b.id);
+
+  it("Show tasks only drops text, keeping subtasks", () => {
+    expect(ids(viewBlocks(rows, { ...DEFAULT_LIST_VIEW_PREFS, tasksOnly: true }, depth))).toEqual([
+      "1",
+      "2",
+      "4",
+      "5",
+      "6",
+    ]);
+  });
+
+  it("Hide completed drops completed tasks and their subtasks", () => {
+    expect(
+      ids(viewBlocks(rows, { ...DEFAULT_LIST_VIEW_PREFS, hideCompleted: true }, depth)),
+    ).toEqual(["1", "3"]);
+  });
+
+  it("sorts top-level rows and keeps subtasks under their task", () => {
+    const sort = (s: "alphabetical" | "creator" | "created" | "completed") =>
+      ids(viewBlocks(rows, { ...DEFAULT_LIST_VIEW_PREFS, sort: s }, depth, "me"));
+    expect(sort("alphabetical")).toEqual(["6", "4", "5", "3", "1", "2"]);
+    expect(sort("creator")).toEqual(["4", "5", "3", "6", "1", "2"]);
+    expect(sort("created")).toEqual(["4", "5", "6", "1", "2", "3"]);
+    expect(sort("completed")).toEqual(["1", "2", "3", "6", "4", "5"]);
+  });
+
+  it("counts open tasks for sublist rows", () => {
+    expect(openTaskCount(rows)).toBe(2);
   });
 });

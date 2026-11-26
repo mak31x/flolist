@@ -56,7 +56,7 @@ describe("writeBlocks / readBlocks", () => {
     data.setData("text/plain", "## Shopping\n- [ ] milk\n- eggs");
     expect(readBlocks(data)).toEqual([
       { type: "heading2", indent: 0, content: { inline: textInline("Shopping") } },
-      { type: "bullet", indent: 0, content: { inline: textInline("milk") } },
+      { type: "task", indent: 0, content: { inline: textInline("milk") }, completed: false },
       { type: "bullet", indent: 0, content: { inline: textInline("eggs") } },
     ]);
   });
