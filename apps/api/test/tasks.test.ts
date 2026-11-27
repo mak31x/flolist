@@ -418,6 +418,88 @@ describe("tasks across lists", () => {
     expect(await blocksOf(me, list.id)).toEqual([]);
   });
 
+  const moveTo = (who: { id: string }, listId: string, ids: string[], targetListId: string) =>
+    testApp(t.db).request(
+      `/api/v1/lists/${listId}/blocks/move-to`,
+      as(who, send("POST", { clientMutationId: cmid(), ids, targetListId })),
+    );
+
+  it("move-to promotes a subtask to a top-level task of the target and logs moved", async () => {
+    const { me, ws, list } = await setup();
+    const target = await makeList(t.db, me, { workspaceId: ws.id, title: "Target" });
+    const parent = await newTask(me, list.id, "Plan");
+    const child = await newTask(me, list.id, "Book", { parent: parent.taskId });
+    await ok(await moveTo(me, list.id, [child.blockId], target.id));
+    expect(await taskRow(child.taskId)).toMatchObject({
+      listId: target.id,
+      parentTaskId: null,
+    });
+    expect(await taskRow(parent.taskId)).toMatchObject({ listId: list.id });
+    const moved = (await blocksOf(me, target.id)).find((b) => b.id === child.blockId);
+    expect(moved).toMatchObject({ containerType: "list", containerId: target.id, indent: 0 });
+    expect((await blocksOf(me, list.id)).map((b) => b.id)).toEqual([parent.blockId]);
+    const log = await activity(child.taskId);
+    expect(log.at(-1)).toMatchObject({
+      action: "moved",
+      old: { id: list.id, title: "Trip" },
+      new: { id: target.id, title: "Target" },
+    });
+  });
+
+  it("move-to keeps a subtask inside its parent when both are moved, in page order", async () => {
+    const { me, ws, list } = await setup();
+    const target = await makeList(t.db, me, { workspaceId: ws.id, title: "Target" });
+    const a = await newTask(me, list.id, "A", { position: "a0" });
+    const b = await newTask(me, list.id, "B", { position: "a1" });
+    const child = await newTask(me, list.id, "A1", { parent: a.taskId });
+    await ok(await moveTo(me, list.id, [b.blockId, a.blockId, child.blockId], target.id));
+    expect(await taskRow(child.taskId)).toMatchObject({
+      listId: target.id,
+      parentTaskId: a.taskId,
+    });
+    const top = (await blocksOf(me, target.id))
+      .filter((x) => x.containerType === "list")
+      .sort((x, y) => (x.position < y.position ? -1 : 1))
+      .map((x) => x.id);
+    expect(top).toEqual([a.blockId, b.blockId]);
+    expect((await activity(child.taskId)).map((e) => e.action)).not.toContain("moved");
+  });
+
+  it("move-to refuses blocks of another list's page and a body's text blocks", async () => {
+    const { me, ws, list } = await setup();
+    const other = await makeList(t.db, me, { workspaceId: ws.id, title: "Other" });
+    const target = await makeList(t.db, me, { workspaceId: ws.id, title: "Target" });
+    const foreign = await newTask(me, other.id, "Elsewhere");
+    expect(await errorCode(await moveTo(me, list.id, [foreign.blockId], target.id))).toBe(
+      "NOT_FOUND",
+    );
+    const parent = await newTask(me, list.id, "Plan");
+    const note = uuidv7();
+    await ok(
+      await batch(me, list.id, [
+        {
+          op: "upsert",
+          id: note,
+          type: "paragraph",
+          position: "a0",
+          content: text("a note"),
+          container: { type: "task", id: parent.taskId },
+        },
+      ]),
+    );
+    expect(await errorCode(await moveTo(me, list.id, [note], target.id))).toBe("NOT_FOUND");
+  });
+
+  it("move-to answers 404 to someone who can't see the list", async () => {
+    const { me, ws, list } = await setup();
+    const target = await makeList(t.db, me, { workspaceId: ws.id, title: "Target" });
+    const task = await newTask(me, list.id, "Mine");
+    const stranger = await makeUser(t.db);
+    expect(await errorCode(await moveTo(stranger, list.id, [task.blockId], target.id))).toBe(
+      "NOT_FOUND",
+    );
+  });
+
   it("duplicating a list copies its tasks, subtasks and completion", async () => {
     const { me, list } = await setup();
     const parent = await newTask(me, list.id, "Plan");

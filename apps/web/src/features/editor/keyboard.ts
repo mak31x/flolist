@@ -32,6 +32,13 @@ import {
   sameContainer,
 } from "./tree.ts";
 
+export interface BlockSelection {
+  anchor: string;
+  head: string;
+  /** Set by toggling; without it the selection is the range from anchor to head. */
+  ids?: readonly string[];
+}
+
 export interface KeyContext {
   listId: string;
   rootListId: string;
@@ -55,12 +62,17 @@ export interface KeyContext {
   /** ↑ from the first block moves into the list title. */
   focusTitle: () => void;
   /**
-   * Block selection (Esc, Mod+A twice, Shift+↑/↓ at a block's edge): a range from `anchor` to
-   * `head`. While it's active the editor container has focus and takes the keys.
+   * Block selection (Esc, Mod+A twice, Shift+↑/↓ at a block's edge, Shift-click): a range from
+   * `anchor` to `head`; Mod-click (and long-press) toggles single blocks, which makes it a set
+   * (`ids`). While it's active the editor container has focus and takes the keys.
    */
   selection: {
-    get: () => { anchor: string; head: string } | null;
+    get: () => BlockSelection | null;
     set: (anchor: string, head: string) => void;
+    /** Adds or removes one block (Mod-click); the last block left clears the selection. */
+    toggle: (id: string) => void;
+    /** Exactly these blocks (the copies after Duplicate). */
+    setIds: (ids: readonly string[]) => void;
     clear: () => void;
   };
   /** The slash menu: opened by "/" at the start of a block; it takes keys while open. */
@@ -427,9 +439,16 @@ function dividerOnDash(ctx: KeyContext, block: Block, editor: Editor): boolean {
 
 /** The selected blocks, top to bottom. */
 export function selectedBlocks(ctx: KeyContext): Block[] {
-  const sel = ctx.selection.get();
+  return selectedRows(ctx.selection.get(), ctx.rows());
+}
+
+/** `sel` resolved against the visible rows, top to bottom. */
+export function selectedRows(sel: BlockSelection | null, rows: readonly Block[]): Block[] {
   if (!sel) return [];
-  const rows = ctx.rows();
+  if (sel.ids) {
+    const ids = new Set(sel.ids);
+    return rows.filter((b) => ids.has(b.id));
+  }
   const a = rows.findIndex((b) => b.id === sel.anchor);
   const h = rows.findIndex((b) => b.id === sel.head);
   if (a === -1 || h === -1) return [];

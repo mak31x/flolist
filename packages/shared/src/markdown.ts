@@ -199,10 +199,12 @@ export function blocksToMarkdown(blocks: readonly BlockDraft[]): string {
         out += lines.map((l) => `> ${l}`.trimEnd()).join("\n");
         return;
       case "task": {
-        // A GitHub-style checklist item; hard breaks continue under the text.
+        // A GitHub-style checklist item; hard breaks continue under the text. Copy as
+        // Markdown nests subtasks through `indent`.
         const marker = block.completed ? "- [x] " : "- [ ] ";
-        out += `${marker}${first}`.trimEnd();
-        for (const line of rest) out += `\n${" ".repeat(marker.length)}${line}`;
+        const pad = INDENT.repeat(block.indent);
+        out += `${pad}${marker}${first}`.trimEnd();
+        for (const line of rest) out += `\n${pad}${" ".repeat(marker.length)}${line}`;
         return;
       }
       case "bullet":
