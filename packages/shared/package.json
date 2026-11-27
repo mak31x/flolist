@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "chrono-node": "2.10.3",
     "fractional-indexing": "4.0.0",
     "zod": "4.6.7"
   }

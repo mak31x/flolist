@@ -16,7 +16,7 @@ import { notFound, unauthenticated } from "../lib/errors.ts";
 import { validate } from "../middleware/validate.ts";
 import { runMutation } from "../sync/mutation.ts";
 import { dbOf, type AppEnv, type AuthUser } from "../types.ts";
-import { emitTasks, patchTask, taskDto } from "../tasks/service.ts";
+import { emitTasks, patchTask, taskDtoOf } from "../tasks/service.ts";
 
 /**
  * A live task the caller may act on. Access is its home list's (D-045's rule for blocks, so
@@ -55,11 +55,12 @@ export const taskRoutes = new Hono<AppEnv>()
     const db = dbOf(c);
     const { task } = await authorizeTask(db, c.get("user"), "list.view", c.req.valid("param").id);
     const block = await blockOf(db, task.id);
-    return c.json(taskDto(task, block?.id ?? null));
+    return c.json(await taskDtoOf(db, task, block?.id ?? null));
   })
 
   /**
-   * Changes the title and/or completion (field-level LWW, D-006) from places without the
+   * Changes the title, completion, due date, priority or labels (field-level LWW, D-006) from
+   * places without the
    * list's block store (the details panel header now, Inbox/Today later). The task block's
    * content follows the title in the same transaction.
    */
@@ -77,7 +78,13 @@ export const taskRoutes = new Hono<AppEnv>()
           (await patchTask(
             tx,
             task,
-            { inline: input.titleInline, completed: input.completed },
+            {
+              inline: input.titleInline,
+              completed: input.completed,
+              due: input.due,
+              priority: input.priority,
+              labelIds: input.labelIds,
+            },
             user.id,
             now,
           )) ?? task;
@@ -104,7 +111,7 @@ export const taskRoutes = new Hono<AppEnv>()
           }
         }
         if (updated !== task) await emitTasks(tx, emit, [task.id]);
-        return { status: 200, body: taskDto(updated, block?.id ?? null) };
+        return { status: 200, body: await taskDtoOf(tx, updated, block?.id ?? null) };
       });
     },
   )

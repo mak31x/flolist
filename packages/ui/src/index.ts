@@ -39,6 +39,7 @@ export {
   PopoverClose,
   PopoverContent,
   PopoverTrigger,
+  floatingSurface,
 } from "./components/Popover.tsx";
 export { ProgressRing, type ProgressRingProps } from "./components/ProgressRing.tsx";
 export { SegmentedTabs, type SegmentedTab } from "./components/SegmentedTabs.tsx";

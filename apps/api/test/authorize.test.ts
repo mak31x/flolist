@@ -56,6 +56,15 @@ const routeFor: Partial<Record<Action, (id: string) => [string, RequestInit]>> =
     `/api/v1/workspaces/${id}`,
     jsonBody({ clientMutationId: crypto.randomUUID(), baseVersion: 1, name: "Renamed" }),
   ],
+  "workspace.useLabels": (id) => [
+    "/api/v1/labels",
+    send("POST", {
+      clientMutationId: crypto.randomUUID(),
+      id: crypto.randomUUID(),
+      workspaceId: id,
+      name: "Errands",
+    }),
+  ],
   "workspace.createList": (id) => [
     "/api/v1/lists",
     send("POST", {

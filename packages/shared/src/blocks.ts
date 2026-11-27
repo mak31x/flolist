@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { positionSchema } from "./positions.ts";
 import { clientMutationSchema } from "./lists.ts";
+import { prioritySchema, taskDueSchema, taskFieldsInputSchema } from "./task-fields.ts";
 
 /**
  * Blocks (D-007, lists-and-blocks.md → Block types). A container (a list now, a task body from
@@ -180,6 +181,10 @@ export type BlockContainer = z.infer<typeof blockContainerSchema>;
 export const blockTaskSchema = z.object({
   completedAt: z.iso.datetime().nullable(),
   completedBy: z.uuid().nullable(),
+  due: taskDueSchema.nullable(),
+  priority: prioritySchema,
+  /** In the order they were added. */
+  labelIds: z.array(z.uuid()),
 });
 export type BlockTask = z.infer<typeof blockTaskSchema>;
 
@@ -237,9 +242,13 @@ export const upsertBlockOpSchema = z.object({
   sublist: z.object({ id: z.uuid(), title: z.string().max(500) }).optional(),
   /**
    * Task blocks. `id` is the client-made task id, required when the block becomes a task (on
-   * create, or when a text block is turned into one); `completed` completes or reopens it.
+   * create, or when a text block is turned into one); `completed` completes or reopens it;
+   * `due`/`priority`/`labelIds` set those fields (only the sent ones change).
    */
-  task: z.object({ id: z.uuid().optional(), completed: z.boolean().optional() }).optional(),
+  task: z
+    .object({ id: z.uuid().optional(), completed: z.boolean().optional() })
+    .extend(taskFieldsInputSchema.shape)
+    .optional(),
   /**
    * The container: on create (default: the list itself), or a new one for an existing block.
    * It must be the list, or the body of a task that lives in it.

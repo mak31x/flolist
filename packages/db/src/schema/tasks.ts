@@ -1,10 +1,17 @@
+import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  check,
+  date,
   index,
   jsonb,
   pgTable,
+  primaryKey,
+  smallint,
   text,
+  time,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
@@ -12,11 +19,18 @@ import { createdAt, id, updatedAt, version } from "./columns.ts";
 import { lists } from "./lists.ts";
 import { workspaces } from "./workspaces.ts";
 
+/** Highest priority (`PRIORITIES` in packages/shared: none, low, medium, high). */
+export const taskMaxPriority = 3;
+/** Label colours (`LABEL_COLORS` in packages/shared); null = the default grey chip. */
+export const labelColors = ["gray", "red", "orange", "green", "blue", "purple"] as const;
+
 /**
  * A task (data-model.md → Blocks and tasks, D-056). In a list it is shown by one `task` block
  * (`blocks.task_id`); subtasks are task blocks in the parent's body and keep the parent's home
  * list in `list_id`. `title_inline` is the Tiptap inline title (the block's content), `title` its
- * plain text. Dates, priority, assignee and source columns arrive with their phases.
+ * plain text. The due date is a calendar date + optional wall-clock time in `due_tz` (CLAUDE.md
+ * → Dates); priority 0 none · 1 low · 2 medium · 3 high. Recurrence, assignee and source columns
+ * arrive with their phases.
  */
 export const tasks = pgTable(
   "tasks",
@@ -33,6 +47,10 @@ export const tasks = pgTable(
     }),
     title: text("title").notNull().default(""),
     titleInline: jsonb("title_inline").$type<unknown[]>().notNull().default([]),
+    dueDate: date("due_date", { mode: "string" }),
+    dueTime: time("due_time"),
+    dueTz: text("due_tz"),
+    priority: smallint("priority").notNull().default(0),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     completedBy: uuid("completed_by").references(() => user.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
@@ -49,6 +67,53 @@ export const tasks = pgTable(
     index("tasks_parent_task_id_idx").on(t.parentTaskId),
     index("tasks_trash_root_id_idx").on(t.trashRootId),
     index("tasks_workspace_id_idx").on(t.workspaceId),
+    check(
+      "tasks_due_check",
+      sql`(${t.dueDate} is null) = (${t.dueTz} is null) and (${t.dueTime} is null or ${t.dueDate} is not null)`,
+    ),
+    check("tasks_priority_check", sql.raw(`"priority" between 0 and ${String(taskMaxPriority)}`)),
+  ],
+);
+
+/** Workspace-scoped labels (tasks.md → Labels), unique per workspace ignoring case. */
+export const labels = pgTable(
+  "labels",
+  {
+    id: id(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color", { enum: labelColors }),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("labels_workspace_name_idx").on(t.workspaceId, sql`lower(${t.name})`),
+    check(
+      "labels_color_check",
+      sql.raw(`"color" is null or "color" in (${labelColors.map((c) => `'${c}'`).join(", ")})`),
+    ),
+  ],
+);
+
+/** A label on a task; chips show in the order they were added. */
+export const taskLabels = pgTable(
+  "task_labels",
+  {
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    labelId: uuid("label_id")
+      .notNull()
+      .references(() => labels.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.labelId] }),
+    index("task_labels_label_id_idx").on(t.labelId),
   ],
 );
 

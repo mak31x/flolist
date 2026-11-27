@@ -115,15 +115,15 @@ export const LIST_SORTS = [
 export const listSortSchema = z.enum(LIST_SORTS);
 export type ListSort = z.infer<typeof listSortSchema>;
 
-/**
- * Sorts the menu offers so far. Priority, Due date and Label come with M3.2, Assignee with M7.3
- * and Source with the integrations (M9).
- */
+/** Sorts the menu offers so far. Assignee comes with M7.3 and Source with the integrations (M9). */
 export const AVAILABLE_LIST_SORTS = [
   "manual",
   "creator",
   "alphabetical",
+  "priority",
   "created",
+  "due",
+  "label",
   "completed",
 ] as const satisfies readonly ListSort[];
 

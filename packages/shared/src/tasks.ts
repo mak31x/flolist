@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { inlineContentSchema, inlineText, type InlineNode } from "./blocks.ts";
 import { clientMutationSchema } from "./lists.ts";
+import { prioritySchema, taskDueSchema, taskFieldsInputSchema } from "./task-fields.ts";
 
 /**
  * Tasks (tasks.md → Task properties). In a list a task is a `task` block whose content is the
  * title; the `tasks` row holds everything else. Subtasks are task blocks in a task's body.
- * M3.1 has title, completion, subtasks and activity; dates, priority, labels, assignees and
- * sources arrive in their own phases.
+ * M3.1 added title, completion, subtasks and activity; M3.2 due dates, priority and labels.
+ * Recurrence, reminders, assignees and sources arrive in their own phases.
  */
 
 /** Characters in a task title `[assumption]`. */
@@ -40,6 +41,9 @@ export const taskSchema = z.object({
   titleInline: inlineContentSchema,
   completedAt: z.iso.datetime().nullable(),
   completedBy: z.uuid().nullable(),
+  due: taskDueSchema.nullable(),
+  priority: prioritySchema,
+  labelIds: z.array(z.uuid()),
   createdBy: z.uuid().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -54,12 +58,16 @@ export const updateTaskSchema = clientMutationSchema
     completed: z.boolean().optional(),
     baseVersion: z.number().int().positive().optional(),
   })
-  .refine((v) => v.titleInline !== undefined || v.completed !== undefined, {
-    error: "Send at least one field to change",
-  });
+  .extend(taskFieldsInputSchema.shape)
+  .refine(
+    (v) => [v.titleInline, v.completed, v.due, v.priority, v.labelIds].some((f) => f !== undefined),
+    { error: "Send at least one field to change" },
+  );
 export type UpdateTask = z.infer<typeof updateTaskSchema>;
 
-// Activity log (tasks.md → Activity log). M3.1 records these; the rest arrive with their fields.
+// Activity log (tasks.md → Activity log). Each phase adds the actions of its fields. Old/new
+// values: `due_changed` → TaskDue | null, `priority_changed` → Priority, `labels_changed` →
+// label names (so the log still reads well after a label is renamed or deleted).
 
 export const ACTIVITY_ACTIONS = [
   "created",
@@ -67,6 +75,9 @@ export const ACTIVITY_ACTIONS = [
   "completed",
   "reopened",
   "restored",
+  "due_changed",
+  "priority_changed",
+  "labels_changed",
 ] as const;
 export const activityActionSchema = z.enum(ACTIVITY_ACTIONS);
 export type ActivityAction = z.infer<typeof activityActionSchema>;

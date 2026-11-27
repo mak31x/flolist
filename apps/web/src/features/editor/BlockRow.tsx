@@ -11,6 +11,8 @@ import { AttachmentBlock, ImageBlock } from "./MediaBlocks.tsx";
 import { SublistBlock } from "./SublistBlock.tsx";
 import { TaskMarker, TaskTrailing } from "./TaskRow.tsx";
 import { isDone } from "./task-utils.ts";
+import { TaskMetaLine } from "../properties/TaskProperties.tsx";
+import { useTaskFields } from "../properties/task-fields-context.ts";
 
 export interface BlockRowProps {
   block: Block;
@@ -123,6 +125,7 @@ const dividerBorder: Record<string, string> = {
  */
 export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
   const { block } = props;
+  const fields = useTaskFields();
   const sortable = useSortable({
     id: block.id,
     disabled: !props.saved || props.draggable === false,
@@ -211,34 +214,46 @@ export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
         style={block.indent > 0 ? { paddingLeft: block.indent * INDENT_PX } : undefined}
       >
         {marker}
-        <InlineEditor
-          blockId={block.id}
-          inline={inline}
-          placeholder={
-            props.placeholder ??
-            (block.type.startsWith("heading")
-              ? typeLabel(block)
-              : task
-                ? t("editor.task.placeholder")
-                : undefined)
-          }
-          ariaLabel={typeLabel(block)}
-          className={cn(
-            "text-text transition-colors duration-(--motion-fast)",
-            textClass[block.type],
-            task && isDone(block) && "text-text-muted line-through",
+        {/* One wrapper for every text type, so Turn into keeps the editor mounted. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <InlineEditor
+            blockId={block.id}
+            inline={inline}
+            placeholder={
+              props.placeholder ??
+              (block.type.startsWith("heading")
+                ? typeLabel(block)
+                : task
+                  ? t("editor.task.placeholder")
+                  : undefined)
+            }
+            ariaLabel={typeLabel(block)}
+            className={cn(
+              "text-text transition-colors duration-(--motion-fast)",
+              textClass[block.type],
+              task && isDone(block) && "text-text-muted line-through",
+            )}
+            onChange={(next) => {
+              props.onChange(block, next);
+            }}
+            onKeyDown={(event, editor) => props.onKeyDown?.(block, event, editor) ?? false}
+            onRequestLink={props.onRequestLink}
+            onFocus={() => {
+              props.onFocus?.(block);
+            }}
+            onPaste={(event, editor) => props.onPaste?.(block, event, editor) ?? false}
+            onHistory={props.onHistory}
+          />
+          {task && fields && props.saved && (
+            <TaskMetaLine
+              block={block}
+              workspaceId={fields.workspaceId}
+              onFields={(f) => {
+                fields.setFields(block, f);
+              }}
+            />
           )}
-          onChange={(next) => {
-            props.onChange(block, next);
-          }}
-          onKeyDown={(event, editor) => props.onKeyDown?.(block, event, editor) ?? false}
-          onRequestLink={props.onRequestLink}
-          onFocus={() => {
-            props.onFocus?.(block);
-          }}
-          onPaste={(event, editor) => props.onPaste?.(block, event, editor) ?? false}
-          onHistory={props.onHistory}
-        />
+        </div>
         {task && (
           <TaskTrailing
             block={block}

@@ -1,5 +1,10 @@
-import type { ActivityEvent } from "@flolist/shared";
+import { formatDue, PRIORITIES, taskDueSchema, type ActivityEvent } from "@flolist/shared";
+import { z } from "zod";
 import { t } from "../../i18n/index.ts";
+import { priorityName } from "../properties/priority.ts";
+
+const names = z.array(z.string()).catch([]);
+const list = (items: readonly string[]) => items.map((n) => `“${n}”`).join(", ");
 
 const dayFormat = new Intl.DateTimeFormat(undefined, {
   weekday: "long",
@@ -20,7 +25,39 @@ export function activityText(event: ActivityEvent): string {
       title: typeof event.new === "string" ? event.new : "",
     });
   }
-  return t(`tasks.activity.${event.action}`, { name });
+  switch (event.action) {
+    case "due_changed": {
+      const due = taskDueSchema.safeParse(event.new);
+      if (!due.success) return t("tasks.activity.due_cleared", { name });
+      return t("tasks.activity.due_set", {
+        name,
+        date: formatDue(due.data, due.data.date, { relative: false }),
+      });
+    }
+    case "priority_changed": {
+      const level = typeof event.new === "number" ? PRIORITIES[event.new] : undefined;
+      if (!level || level === "none") return t("tasks.activity.priority_cleared", { name });
+      return t("tasks.activity.priority_set", { name, priority: priorityName(level) });
+    }
+    case "labels_changed": {
+      const before = names.parse(event.old);
+      const after = names.parse(event.new);
+      const added = after.filter((n) => !before.includes(n));
+      const removed = before.filter((n) => !after.includes(n));
+      if (added.length > 0 && removed.length > 0) {
+        return t("tasks.activity.labels_changed", {
+          name,
+          added: list(added),
+          removed: list(removed),
+        });
+      }
+      if (removed.length > 0)
+        return t("tasks.activity.labels_removed", { name, labels: list(removed) });
+      return t("tasks.activity.labels_added", { name, labels: list(added) });
+    }
+    default:
+      return t(`tasks.activity.${event.action}`, { name });
+  }
 }
 
 /** Entries grouped by local day, each group under its date. */

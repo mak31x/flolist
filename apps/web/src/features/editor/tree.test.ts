@@ -31,7 +31,7 @@ const task = (n: number, over: Partial<Block> = {}) =>
   b(n, {
     type: "task",
     taskId: id(100 + n),
-    task: { completedAt: null, completedBy: null },
+    task: { completedAt: null, completedBy: null, due: null, priority: 0, labelIds: [] },
     ...over,
   });
 const inTask = (parent: number) => ({
@@ -44,7 +44,11 @@ const blocks = [
   task(1),
   task(2, { ...inTask(1), position: "a0" }),
   b(3, { ...inTask(1), position: "a1" }),
-  task(4, { ...inTask(2), position: "a0", task: { completedAt: "x", completedBy: null } }),
+  task(4, {
+    ...inTask(2),
+    position: "a0",
+    task: { completedAt: "x", completedBy: null, due: null, priority: 0, labelIds: [] },
+  }),
   b(5),
 ].sort((x, y) => (x.position < y.position ? -1 : x.position > y.position ? 1 : 0));
 

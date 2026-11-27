@@ -17,6 +17,10 @@ export const workspaceActions = [
   "workspace.uploadFile",
   /** Create a list owned by this workspace (lists-and-blocks.md → Lists). */
   "workspace.createList",
+  /** See, create and apply the workspace's labels (tasks.md → Labels). */
+  "workspace.useLabels",
+  /** Rename, merge, recolour and delete labels (Settings → Labels). */
+  "workspace.manageLabels",
 ] as const;
 export type WorkspaceAction = (typeof workspaceActions)[number];
 
@@ -72,7 +76,14 @@ type Matrix = Record<WorkspaceKind, Record<WorkspaceRole, readonly WorkspaceActi
  */
 const workspaceMatrix: Matrix = {
   personal: {
-    owner: ["workspace.view", "workspace.update", "workspace.uploadFile", "workspace.createList"],
+    owner: [
+      "workspace.view",
+      "workspace.update",
+      "workspace.uploadFile",
+      "workspace.createList",
+      "workspace.useLabels",
+      "workspace.manageLabels",
+    ],
     member: [],
   },
   team: {
@@ -83,8 +94,17 @@ const workspaceMatrix: Matrix = {
       "workspace.manageMembers",
       "workspace.uploadFile",
       "workspace.createList",
+      "workspace.useLabels",
+      "workspace.manageLabels",
     ],
-    member: ["workspace.view", "workspace.uploadFile", "workspace.createList"],
+    // Labels are shared vocabulary: any member may tidy them up [assumption].
+    member: [
+      "workspace.view",
+      "workspace.uploadFile",
+      "workspace.createList",
+      "workspace.useLabels",
+      "workspace.manageLabels",
+    ],
   },
 };
 

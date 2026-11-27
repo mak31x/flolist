@@ -1,4 +1,9 @@
-import { DEFAULT_LIST_VIEW_PREFS, textInline, type Block } from "@flolist/shared";
+import {
+  DEFAULT_LIST_VIEW_PREFS,
+  textInline,
+  type Block,
+  type ListViewPrefs,
+} from "@flolist/shared";
 import { describe, expect, it } from "vitest";
 import { openTaskCount, viewBlocks } from "./list-view.ts";
 
@@ -49,10 +54,12 @@ describe("viewBlocks with tasks", () => {
   const task = (id: string, text: string, over: Partial<Block> = {}): Block => ({
     ...block(id, text, "task"),
     taskId: `t${id}`,
-    task: { completedAt: null, completedBy: null },
+    task: { completedAt: null, completedBy: null, due: null, priority: 0, labelIds: [] },
     ...over,
   });
-  const done = (at: string) => ({ task: { completedAt: at, completedBy: "me" } });
+  const done = (at: string) => ({
+    task: { completedAt: at, completedBy: "me", due: null, priority: 0, labelIds: [] },
+  });
   const rows = [
     task("1", "Write", { createdAt: "2026-11-01", createdBy: "other" }),
     task("2", "sub of write", done("2026-11-03T00:00:00Z")),
@@ -98,5 +105,33 @@ describe("viewBlocks with tasks", () => {
 
   it("counts open tasks for sublist rows", () => {
     expect(openTaskCount(rows)).toBe(2);
+  });
+});
+
+describe("task-field sorts", () => {
+  const due = (date: string, time: string | null = null) => ({ date, time, tz: "UTC" });
+  const row = (id: number, task: Partial<NonNullable<Block["task"]>>): Block => ({
+    ...block(String(id), `t${String(id)}`, "task"),
+    taskId: `t${String(id)}`,
+    task: { completedAt: null, completedBy: null, due: null, priority: 0, labelIds: [], ...task },
+  });
+  const ids = (rows: readonly Block[]) => rows.map((b) => b.id);
+  const prefs = (sort: ListViewPrefs["sort"]): ListViewPrefs => ({
+    sort,
+    hideCompleted: false,
+    tasksOnly: false,
+  });
+
+  it("sorts by priority, due date and label", () => {
+    const a = row(1, { priority: 1, due: due("2026-12-02"), labelIds: ["l-b"] });
+    const b = row(2, { priority: 3, due: due("2026-12-01") });
+    const c = row(3, { due: due("2026-12-01", "09:00"), labelIds: ["l-a"] });
+    const d = row(4, {});
+    expect(ids(viewBlocks([a, b, c, d], prefs("priority")))).toEqual(ids([b, a, c, d]));
+    expect(ids(viewBlocks([a, b, c, d], prefs("due")))).toEqual(ids([c, b, a, d]));
+    const names: Record<string, string> = { "l-a": "Alpha", "l-b": "Beta" };
+    expect(
+      ids(viewBlocks([a, b, c, d], prefs("label"), new Map(), null, (id) => names[id])),
+    ).toEqual(ids([c, a, b, d]));
   });
 });

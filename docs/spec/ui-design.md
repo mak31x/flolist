@@ -83,7 +83,7 @@ Top to bottom:
 ## 6. Date picker popover (anchored to the Due date chip or the row icon)
 - Quick picks: **Today**, **Tomorrow**, **Next week**, each with a calendar icon. When a date is set, a "No due date" item clears it.
 - A month calendar with a month label and ‹ › arrows. Weekend columns have a shaded background, today is circled, and the selected date is filled with the accent. The week starts according to the user's setting.
-- Rows below: **⏱ Time** (optional due time), **🔔 Remind me** (disabled until a time is set; then offers presets), **↻ Repeat**.
+- Rows below: **⏱ Time** (optional due time), **🔔 Remind me** (disabled until a time is set; then offers presets), **↻ Repeat**. Flolist adds Remind me with reminders (M5.2) and Repeat with recurring tasks (M5.1); until then the picker shows only Time (D-067).
 - Repeat submenu: Daily · Weekly *on Tuesday* · Every 2 weeks *on Tuesday* · Every weekday *Monday to Friday* · Monthly *on the 24th* · Yearly *on Nov 24* · **Repeat every…**, which expands an interval number, a unit dropdown (Day/Week/Month/Year) and weekday toggles **M T W T F S S** (for weeks), with **Clear** and **Done** buttons. The suffixes in italics are computed from the selected date and shown in muted text.
 
 ## 7. Motion
