@@ -4,13 +4,12 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M3.2 Dates, priority, labels, natural language (done; branch `phase/M3.2-dates-priority-labels`). D-063–D-070.
-- **State:** migration 0007 adds `tasks.due_date|due_time|due_tz` (CHECK: date ⇔ tz, time needs date) and `priority` (0–3), plus `labels` (unique `lower(name)` per workspace, optional colour) and `task_labels`. Task DTO and block `task` carry `due {date,time,tz}`, `priority`, `labelIds`; PATCH `/tasks/:id` and the batch upsert `task: {...}` set them (tz defaults to the profile zone), logging `due_changed|priority_changed|labels_changed`. New `/labels` routes (GET/POST/PATCH merge/DELETE), `label` events on `workspace:<id>`, matrix actions `workspace.useLabels|manageLabels`.
-- **Shared:** `dates/` (`parseNaturalDate`/`findNaturalDates`/`removeNaturalDate`, `formatDue`, `isOverdue`, civil-date helpers), `task-fields.ts` (kept apart from tasks.ts to avoid a blocks↔tasks import cycle), `labels.ts`.
-- **Web:** `features/properties/` — DatePicker, LabelPicker, TaskProperties (details chips + row `TaskMetaLine`), `suggestion.ts` + `DateSuggestionPopup` (mounted once in AppShell), `shortcuts.ts`, `picker-store.ts` (opens pickers from keys), `labels-api.ts`, LabelsTab. BlockEditor provides `TaskFieldsContext`; BlockStore fields gained `due`/`priority`/`labelIds`.
-- **Run / verify:** `pnpm infra:up`, `pnpm db:migrate`, `pnpm dev`; in a list type `[] pay rent tomorrow at 5pm` → Return; Mod+Enter → Due/Priority/Labels chips; ^D / ^L in a title; Settings → Labels. `pnpm check`; `pnpm test:e2e` (dates.spec.ts).
-- **Gotchas:** text offsets in a title map to ProseMirror positions as `offset + 1` (one paragraph, hard breaks = 1 char via `textBetween(…, "\n", "\n")`). A task can only reference saved labels: the picker awaits the create before setting `labelIds`. The activity log also refetches when the task block's version changes (WS echoes lag under load). Other projects' dev servers on this machine can slow e2e to timeouts.
-- **Next:** M3.3 Task actions + multiselect.
+- **Last phase:** M3.3 Task actions + multiselect (done; branch `phase/M3.3-task-actions-multiselect`). D-071–D-074.
+- **State:** no migration. `POST /lists/:id/blocks/move-to` now takes any block of the list *page* (subtask blocks too: they become top-level tasks of the target), keeps page order and logs `moved` (`{id,title}` old/new) per moved task. Duplicate is client-side: one store batch copies the task, body and subtasks (no new route).
+- **Web:** `features/tasks/` — `actions.tsx` (the registry + `TaskActionHost`), `task-ops.ts` (pure ops/copy text, tested), `TaskMenus.tsx` (row context menu, ⋮ items), `SelectionBar.tsx`, `MoveToListDialog.tsx` + `move-store.ts` (mounted in AppShell), `task-actions-context.ts`. `editor/select-gestures.ts` (Mod/Shift-click, long-press). `KeyContext.selection` is a range or a set (`ids`; `toggle`, `setIds`); `selectedRows()` resolves it. Platform: `appOrigin`, `writeClipboard`.
+- **Run / verify:** `pnpm infra:up`, `pnpm dev`; right-click a task; ⌘/Ctrl-click and Shift-click rows → bar; Esc then ⌘D / ⌘⇧D / ⌘⌫; ⋮ in details. `pnpm check`; `pnpm test:e2e` (task-actions.spec.ts).
+- **Gotchas:** stop your own dev servers before `pnpm test:e2e`, or it reuses an API with the 10/min sign-up limit. Radix menus restore focus on close: the row menu prevents it so Duplicate/pickers can place focus; picker actions open in a `setTimeout`. Focus moving into the bar or anything with `data-keep-selection` keeps the selection. macOS turns Ctrl-click into a context-menu click; select-clicks suppress it. e2e lists must wait for their titles to save before moves read them.
+- **Next:** M4.1 Inbox + Today (also brings Add to / Remove from Inbox and ⌘⇧I / ⌘⇧R into the actions registry).
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -82,8 +81,13 @@ Specs: spec/tasks.md (NL dates, due dates, labels, priority), spec/ui-design.md 
 - [x] Priority / Due date / Label sorts in the funnel menu; ^T ^D ^⇧D ^L shortcuts; activity entries for the new fields
 Done when: typing "pay rent tomorrow at 5pm" sets the date and strips that text from the title. ✔ (dates.spec.ts)
 - Left for later phases: Remind me (M5.2) and Repeat (M5.1) rows in the date picker; repeat phrases are parsed but not offered until M5.1. `#label` in the quick command comes with M4.3.
-### M3.3 Task actions + multiselect `[ ]`
+### M3.3 Task actions + multiselect `[x]`
 Specs: spec/tasks.md (actions), spec/views.md (Multiselect)
+- [x] Task actions in a row context menu and the details ⋮ (one shared registry)
+- [x] Multiselect in lists (Shift-click range, Mod-click toggle, long-press) with a floating action bar; dragging carries the selection
+- [x] Duplicate, Move to list…, Copy link / as text / as Markdown; "moved" activity entries; ⌘⇧D and ⌘⌫ on a selection
+- Deferred: Add to / Remove from Inbox and Remove from list (M4.1, needs the Inbox view), Assign (M7.3). The multiselect bar is used in lists only until M4's task views exist.
+- Fixed in passing: M3.2's meta line always showed the empty priority/label icons on dated tasks (`inline-flex` beat `hidden`).
 
 ## M4 — Views, search, keyboard
 ### M4.1 Inbox + Today `[ ]`  Specs: spec/views.md (Inbox, Today)
@@ -167,7 +171,6 @@ Done when (M4): a full day of work is possible without the mouse.
 - Change the primary email with re-verification (settings-and-account.md marks it a Flolist extra)
 - Server-side image resizing/thumbnails in the worker for uploads (architecture.md → Uploads); M2.3 downscales covers in the browser only, image blocks keep originals (D-052)
 - Block handle on phones (long-press menu / drag) — hidden below 768px in M2.2 (D-047)
-- Shift+click to extend a block selection with the mouse (D-048)
 - Lazy Tiptap (static HTML until focus) together with virtualization in M8.2, keeping iOS keyboard focus working (D-047)
 - Indenting a list item could carry its deeper children along (outline behaviour); M2.2 moves only the block
 - Keyboard reordering for sidebar sections (lists already reorder by keyboard; sections are mouse/touch only, D-044)
@@ -177,6 +180,10 @@ Done when (M4): a full day of work is possible without the mouse.
 - Show list covers on phones/tablets (a header image), since the right panel only exists on desktop (D-027)
 - Copy files on Duplicate list instead of sharing them, if per-list file deletion ever needs it (D-053)
 - Paste of a copied sublist could re-create the sublist (today it pastes its title, D-051)
+- Resolve the ^P "Set priority" row in keyboard-shortcuts.md against D-068 (which ships no priority shortcut); decide and log it, then build or drop it
+- Show the whole dragged selection moving (a drag overlay with a count); M3.3 moves only the grabbed row visually (D-073)
+- One undo step for Move to list (today it clears the undo stack, D-054/D-071)
+- E2e flake: lists.spec "sync live between two windows" sometimes fails under parallel load (seen in M3.3, unrelated to its changes)
 - Shift+Tab on a subtask could carry its later siblings along as its own subtasks (outline behaviour); M3.1 moves only the task (D-059)
 - Paste nested Markdown checklists as subtasks (they paste flat in M3.1, D-061)
 - Trash tasks together with their deleted list, so Today/Inbox (M4) never surface them; M3.1 hides them only through the list's access (D-056)

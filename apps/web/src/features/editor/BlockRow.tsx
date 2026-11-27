@@ -1,5 +1,5 @@
 import type { Block, InlineNode } from "@flolist/shared";
-import { cn } from "@flolist/ui";
+import { cn, ContextMenu, ContextMenuTrigger } from "@flolist/ui";
 import type { Editor } from "@tiptap/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -13,6 +13,9 @@ import { TaskMarker, TaskTrailing } from "./TaskRow.tsx";
 import { isDone } from "./task-utils.ts";
 import { TaskMetaLine } from "../properties/TaskProperties.tsx";
 import { useTaskFields } from "../properties/task-fields-context.ts";
+import { useTaskActions } from "../tasks/task-actions-context.ts";
+import { TaskContextMenuContent } from "../tasks/TaskMenus.tsx";
+import { useSelectGestures, type SelectMode } from "./select-gestures.ts";
 
 export interface BlockRowProps {
   block: Block;
@@ -31,6 +34,10 @@ export interface BlockRowProps {
   onFocus?: (block: Block) => void;
   /** Part of the block selection (highlighted). */
   selected?: boolean;
+  /** Some block of this editor is selected (taps toggle rows then). */
+  selecting?: boolean;
+  /** Mod-click / Shift-click / long-press (views.md → Multiselect). */
+  onSelectClick?: (block: Block, mode: SelectMode) => void;
   onPaste?: (block: Block, event: ClipboardEvent, editor: Editor) => boolean;
   onHistory?: (action: "undo" | "redo") => void;
   /** False for an empty list's unsaved placeholder: no handle, no dragging. */
@@ -123,9 +130,23 @@ const dividerBorder: Record<string, string> = {
  * One block: a sortable row with the hover handle, its marker (bullet, number, quote bar) and
  * its inline editor, or a divider (focusable as a whole).
  */
+/** Touch-first devices get long-press selection instead of the long-press context menu. */
+const coarsePointer = () =>
+  typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+
 export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
   const { block } = props;
   const fields = useTaskFields();
+  const actions = useTaskActions();
+  const gestures = useSelectGestures(
+    block,
+    props.saved,
+    props.selecting ?? false,
+    props.onSelectClick,
+  );
+  // Every row sits in a context-menu trigger (so Turn into never remounts it); only saved
+  // tasks have the menu, other blocks keep the browser's own.
+  const taskMenu = block.type === "task" && props.saved && actions !== null;
   const sortable = useSortable({
     id: block.id,
     disabled: !props.saved || props.draggable === false,
@@ -267,30 +288,36 @@ export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
   }
 
   return (
-    <div
-      ref={sortable.setNodeRef}
-      data-block-id={block.id}
-      data-block-type={block.type}
-      data-selected={props.selected || undefined}
-      data-depth={props.depth || undefined}
-      style={{ ...style, ...(props.depth ? { marginLeft: props.depth * INDENT_PX } : {}) }}
-      className={cn(
-        "group/block relative rounded-md",
-        props.selected && "bg-surface-selected",
-        gapClass[block.type],
-        sortable.isDragging && "z-10 opacity-60",
-      )}
-    >
-      {props.saved && (
-        <BlockHandle
-          block={block}
-          dragRef={sortable.setActivatorNodeRef}
-          dragAttributes={sortable.attributes}
-          dragListeners={sortable.listeners}
-          onAction={props.onAction}
-        />
-      )}
-      {body}
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={!taskMenu || coarsePointer()}>
+        <div
+          ref={sortable.setNodeRef}
+          {...gestures}
+          data-block-id={block.id}
+          data-block-type={block.type}
+          data-selected={props.selected || undefined}
+          data-depth={props.depth || undefined}
+          style={{ ...style, ...(props.depth ? { marginLeft: props.depth * INDENT_PX } : {}) }}
+          className={cn(
+            "group/block relative rounded-md",
+            props.selected && "bg-surface-selected",
+            gapClass[block.type],
+            sortable.isDragging && "z-10 opacity-60",
+          )}
+        >
+          {props.saved && (
+            <BlockHandle
+              block={block}
+              dragRef={sortable.setActivatorNodeRef}
+              dragAttributes={sortable.attributes}
+              dragListeners={sortable.listeners}
+              onAction={props.onAction}
+            />
+          )}
+          {body}
+        </div>
+      </ContextMenuTrigger>
+      {taskMenu && <TaskContextMenuContent block={block} />}
+    </ContextMenu>
   );
 });

@@ -183,7 +183,7 @@ export function TaskPropertyChips({
 }
 
 const metaButton =
-  "inline-flex h-5 items-center gap-1 rounded-full px-1 text-meta text-text-muted outline-none hover:bg-chip focus-visible:ring-2 focus-visible:ring-focus-ring [&_svg]:size-3.5";
+  "h-5 items-center gap-1 rounded-full px-1 text-meta text-text-muted outline-none hover:bg-chip focus-visible:ring-2 focus-visible:ring-focus-ring [&_svg]:size-3.5";
 
 /**
  * Under a task row's title (ui-design §4): the meta line (due date, priority, labels) and,
@@ -201,8 +201,10 @@ export function TaskMetaLine({ block, workspaceId, onFields }: TaskFieldsProps) 
   const anyOpen = dueOpen || priorityOpen || labelsOpen;
   const title = block.id;
   const common = { blockId: block.id, scope: "row" as const, returnFocusTo: title };
-  // Empty fields show as icons only while editing (or while their picker is open).
-  const editing = "hidden group-focus-within/block:inline-flex";
+  // Empty fields show as icons only while editing (or while their picker is open). The display
+  // class is picked, not stacked: `inline-flex` would win over `hidden` in the stylesheet.
+  const shown = (empty: boolean) =>
+    empty ? "hidden group-focus-within/block:inline-flex" : "inline-flex";
 
   return (
     <div
@@ -225,7 +227,7 @@ export function TaskMetaLine({ block, workspaceId, onFields }: TaskFieldsProps) 
                 ? t(due.overdue ? "due.overdue" : "due.label", { date: due.text })
                 : t("editor.task.dueDate", { title: "" }).trim()
             }
-            className={cn(metaButton, due?.overdue && "text-accent", !due && !dueOpen && editing)}
+            className={cn(metaButton, due?.overdue && "text-accent", shown(!due && !dueOpen))}
           >
             <Calendar aria-hidden />
             {due && <span>{due.text}</span>}
@@ -246,7 +248,7 @@ export function TaskMetaLine({ block, workspaceId, onFields }: TaskFieldsProps) 
                 ? t("priority.label", { priority: priorityName(priorityOf(task.priority)) })
                 : t("priority.chip")
             }
-            className={cn(metaButton, task.priority === 0 && !priorityOpen && editing)}
+            className={cn(metaButton, shown(task.priority === 0 && !priorityOpen))}
           >
             <PriorityIcon value={task.priority} />
           </button>
@@ -263,7 +265,7 @@ export function TaskMetaLine({ block, workspaceId, onFields }: TaskFieldsProps) 
           <button
             type="button"
             aria-label={t("labels.chip")}
-            className={cn(metaButton, "gap-1", labels.length === 0 && !labelsOpen && editing)}
+            className={cn(metaButton, "gap-1", shown(labels.length === 0 && !labelsOpen))}
           >
             {labels.length === 0 ? (
               <Tag aria-hidden />

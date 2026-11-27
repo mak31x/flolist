@@ -67,7 +67,8 @@ export type UpdateTask = z.infer<typeof updateTaskSchema>;
 
 // Activity log (tasks.md → Activity log). Each phase adds the actions of its fields. Old/new
 // values: `due_changed` → TaskDue | null, `priority_changed` → Priority, `labels_changed` →
-// label names (so the log still reads well after a label is renamed or deleted).
+// label names (so the log still reads well after a label is renamed or deleted), `moved` →
+// `{id, title}` of the old and new home list (titles as they were then).
 
 export const ACTIVITY_ACTIONS = [
   "created",
@@ -78,6 +79,7 @@ export const ACTIVITY_ACTIONS = [
   "due_changed",
   "priority_changed",
   "labels_changed",
+  "moved",
 ] as const;
 export const activityActionSchema = z.enum(ACTIVITY_ACTIONS);
 export type ActivityAction = z.infer<typeof activityActionSchema>;

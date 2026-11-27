@@ -175,7 +175,7 @@ test("dragging a block onto a sublist row moves it into the sublist", async ({ p
   await page.mouse.move(to.x + 20, to.y + to.height / 2, { steps: 12 });
   await page.mouse.up();
 
-  await expect(page.getByText("Moved 1 block(s)", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Moved 1 block\(s\)/)).toBeVisible();
   await expect
     .poll(async () => (await savedBlocks(page, listId)).map((b) => b.type))
     .toEqual(["sublist", "paragraph"]);

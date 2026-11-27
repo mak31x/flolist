@@ -471,6 +471,32 @@ Decision: `AVAILABLE_LIST_SORTS` adds priority, due and label. Priority: High �
 Context: under parallel e2e load the live `task` echo could arrive after the 5 s assertion window, so the log missed fresh entries.
 Decision: the details panel's activity log also refetches whenever its task block's version changes (the batch answer carries the server's version), in addition to the live `task` event. New activity lines: "set the due date to 28 Nov 5:00 pm" (`formatDue(…, {relative: false})`), "removed the due date", "set the priority to High", "added/removed “Label”".
 
+## D-071 — Move to list for tasks and subtasks (M3.3)  (2026-11-27 · Accepted · extends D-054)
+Decision: `POST /lists/:id/blocks/move-to` accepts any block of the list's *page*: its own blocks, or **task** blocks in the bodies of its tasks (a body's text blocks are refused, 404). A moved subtask becomes a top-level task of the target (`parent_task_id` null, container = the target list); a subtask whose parent task is moved too travels inside it. Moved blocks keep their **page order** (each block's path of positions from the list, byte-wise), not the order of `ids`, matching D-054's "keep their order". Each moved task logs `moved` with `old`/`new` = `{id, title}` of the home lists (titles as they were then), rendered "moved this task from “A” to “B”". The client toast names the target list. Still not undoable (D-054).
+Alternatives: a separate `/tasks/:id/move` route (a second move path for the same rows).
+
+## D-072 — Task actions registry, Duplicate and Copy (M3.3)  (2026-11-27 · Accepted)
+Decision:
+- One registry (`features/tasks/actions.tsx`) lists and runs the actions on one block or many for the row context menu, the details ⋮ and the selection bar, through a `TaskActionHost` (list id, workspace, query client, the editor's `EditorCommands`, page blocks, optional `openTask`/`openPicker`, `onGone`, `onDuplicated`). Order: Open details · Mark complete/incomplete · Set due date · Priority · Labels · Move to list… · Duplicate · Copy link(s) · Copy as text · Copy as Markdown · Delete. Picker items and Open details need exactly one task; pickers open on the task's own chip (`picker-store`, row or details scope). Add to / Remove from Inbox and Remove from list wait for M4.1, Assign for M7.3 (no stubs).
+- **Duplicate is client-side**: one store batch (one undo step, optimistic) creates a copy of each top-level selected block right below it; tasks copy their whole body depth-first (parents before children) with new task ids. Copies are incomplete with no due date and keep priority and labels `[assumption]`; sublists are skipped (Duplicate list copies them). A duplicated selection stays selected as the copies; a single copy gets the caret.
+- Delete is one undo step with an Undo toast (`commands.run(inverse)`); Mark complete toggles like Mod+D (complete all unless all are done) and plays the sound.
+- Copy (platform `writeClipboard`, toast on success/failure): **Markdown** = `blocksToMarkdown` with task `indent` = subtask depth (so subtasks nest as `- [ ]`; tasks now honour `indent` there); **text** = titles, two spaces per subtask level `[assumption]`; **link** = `appOrigin()` + `/lists/:homeListId/tasks/:taskId`, one per line. New platform adapters `appOrigin` (native shells swap in the server URL) and `writeClipboard`.
+- No new libraries in M3.3.
+Alternatives: a server duplicate route (no undo, a second copy implementation next to Duplicate list).
+
+## D-073 — Multiselect gestures, the selection model and the action bar (M3.3)  (2026-11-27 · Accepted · extends D-048)
+Decision (`[assumption]` where Superlist is unchecked):
+- `KeyContext.selection` is a range (anchor → head, D-048) **or a set** (`ids`), with `toggle(id)` and `setIds(ids)`. Mod-click toggles a row (the last one out clears the selection); Shift-click selects the range from the selection's anchor, else from the block being edited — but Shift-click inside the block being edited stays a text selection. Clicks on links (Mod+click opens them, D-047), buttons and checkboxes keep their meaning. Touch: a 500 ms long-press toggles a row and, while a selection exists, a tap toggles. macOS turns Ctrl-click into a context-menu click; a select-click suppresses it.
+- Right-click a task row → its context menu (every row sits in a stable `ContextMenu` trigger so Turn into never remounts it; non-task rows keep the browser menu). A selected row's menu acts on the whole selection. On coarse primary pointers the context menu is off so long-press selects.
+- Keys on a selection: Mod+D complete, Mod+Shift+D duplicate, Mod+Backspace/Delete delete, Mod+Enter open the first task; also from the bar's buttons (plus Esc). Mod+Shift+D also duplicates the task whose title is being edited. ^P (keyboard-shortcuts.md) stays out per D-068 (Backlog to reconcile).
+- Floating bar (list editors only until M4 views): count · Move to list · Set due date · Label · Duplicate · Copy (text/Markdown/links) · Mark complete · Delete · clear; fixed bottom-centre, above the phone FAB, scrolls sideways when narrow. The label picker shows the labels all selected tasks share; checking adds to each, unchecking removes from each. Focus moving into the bar or anything marked `data-keep-selection` (its popovers, the context menu, the Move dialog) keeps the selection.
+- Dragging a selected row carries the selection: a drop on a sublist/sidebar list moves them all (D-071); a reorder lands them together where the grabbed row would, tasks may change container, other blocks only within their own; never into a moved task's own body. Only the grabbed row moves visually (Backlog).
+- One `MoveToListDialog` in the app shell (zustand `useMoveTo`): a combobox over the workspace's other lists, sublists shown as "Parent › Child".
+
+## D-074 — Meta-line display fix (M3.3)  (2026-11-27 · Accepted · corrects D-067's implementation)
+Context: D-067 says empty task fields show as icons only while editing, but the row meta line stacked `inline-flex` and `hidden`, and `inline-flex` won in the stylesheet, so dated tasks always showed empty priority/label icons.
+Decision: the display class is chosen, not stacked (`shown(empty)`); behaviour now matches D-067.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

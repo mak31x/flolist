@@ -128,6 +128,28 @@ export function downloadFile(url: string, filename: string): void {
   a.remove();
 }
 
+/**
+ * The origin links to the app use (Copy link). The web app's own origin; native shells load
+ * the build from a local scheme, so they swap in the configured server URL (M10/M11).
+ */
+export function appOrigin(): string {
+  return window.location.origin;
+}
+
+/**
+ * Puts plain text on the clipboard. The async Clipboard API works in browsers (secure origin)
+ * and both webviews; native shells may route it through their clipboard plugin. Resolves
+ * false when the engine refuses.
+ */
+export async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The system print dialog (Tauri's webview and Capacitor route `print()` to it as well). */
 export function printPage(): void {
   window.print();

@@ -74,10 +74,10 @@
 Open details · Complete/Uncomplete (⌘D) · Set due date · Assign · Label · Priority · Add to / Remove from Inbox (⌘⇧I) · Move to list… · Remove from list (⌘⇧R; moves it back to Inbox only) · Duplicate · Copy link · Copy as text · Copy as Markdown · Delete.
 
 ## Duplicate
-An exact copy of the task with its body and subtasks: incomplete, no assignee, no due date. It is inserted directly below the original.
+An exact copy of the task with its body and subtasks: incomplete, no assignee, no due date. Priority and labels are kept [assumption]. It is inserted directly below the original.
 
 ## Activity log
 Recorded for: created, title changed, completed/reopened (with the new due date for recurrences), due date set/changed/cleared, assignee changed, moved between lists, priority changed, labels changed, restored from trash. Each entry is shown as "1:49 pm: Karan changed the due date to 1 Dec", grouped under day separators and interleaved with messages. Title edits by the same person within 10 minutes merge into one entry [assumption].
 
 ## Printing / export
-A task (or list) prints with a clean stylesheet. Copy-as-Markdown preserves subtasks as nested `- [ ]` items.
+A task (or list) prints with a clean stylesheet. Copy-as-Markdown preserves subtasks as nested `- [ ]` items. Copy as text writes the titles, subtasks indented two spaces per level [assumption]; Copy link writes one details URL per task.

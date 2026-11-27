@@ -1,4 +1,4 @@
-import { blocks, files, lists, tasks } from "@flolist/db";
+import { blocks, files, lists, tasks, type Executor } from "@flolist/db";
 import {
   blockBatchSchema,
   channel,
@@ -77,6 +77,38 @@ const inPage = (listId: string) =>
       ),
     ),
   );
+
+/**
+ * `rows` in the order the list page shows them: each block's path of positions from the list
+ * (its parent tasks' blocks, then its own), compared byte-wise (D-041).
+ */
+async function inPageOrder(tx: Executor, rows: BlockRow[]): Promise<BlockRow[]> {
+  const blockOfTask = new Map<string, BlockRow | null>();
+  async function path(row: BlockRow): Promise<string[]> {
+    const own = [row.position, row.id];
+    if (row.containerType !== "task") return own;
+    let parent = blockOfTask.get(row.containerId);
+    if (parent === undefined) {
+      const [found] = await tx
+        .select()
+        .from(blocks)
+        .where(and(eq(blocks.taskId, row.containerId), isNull(blocks.deletedAt)));
+      parent = found ?? null;
+      blockOfTask.set(row.containerId, parent);
+    }
+    return parent ? [...(await path(parent)), ...own] : own;
+  }
+  const keyed = await Promise.all(rows.map(async (row) => ({ row, key: await path(row) })));
+  const cmp = (a: string[], b: string[]) => {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const x = a[i] ?? "";
+      const y = b[i] ?? "";
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    return a.length - b.length;
+  };
+  return keyed.sort((a, b) => cmp(a.key, b.key)).map((k) => k.row);
+}
 
 export const blockRoutes = new Hono<AppEnv>()
   /**
@@ -636,10 +668,13 @@ export const blockRoutes = new Hono<AppEnv>()
     },
   )
   /**
-   * Moves blocks into another list (a drop on a sublist row or a sidebar list; D-047). They
-   * keep their order and go to the end of the target. A sublist block takes its child lists
-   * along. Both lists must be editable and in the same workspace, and a sublist can't be
-   * dropped into itself or its own sublists. Not undoable [assumption].
+   * Moves blocks into another list (a drop on a sublist row or a sidebar list, D-047; Move to
+   * list…, M3.3). They keep their page order and go to the end of the target. The ids are
+   * blocks of the list's page: its own blocks, or subtask blocks in the bodies of its tasks,
+   * which become top-level tasks of the target. A subtask whose parent task is moved too goes
+   * along inside it. A sublist block takes its child lists along. Both lists must be editable
+   * and in the same workspace, and a sublist can't be dropped into itself or its own
+   * sublists. Each moved task logs `moved`. Not undoable [assumption].
    */
   .post(
     "/:id/blocks/move-to",
@@ -660,20 +695,46 @@ export const blockRoutes = new Hono<AppEnv>()
         if (target.list.workspaceId !== source.list.workspaceId) {
           throw new ApiException("VALIDATION", "Blocks can only move within one workspace");
         }
-        const rows = await tx
+        const found = await tx
           .select()
           .from(blocks)
-          .where(
-            and(
-              inArray(blocks.id, input.ids),
-              eq(blocks.containerType, "list"),
-              eq(blocks.containerId, listId),
-              isNull(blocks.deletedAt),
-            ),
-          )
-          .orderBy(asc(blocks.position), asc(blocks.id))
+          .where(and(inArray(blocks.id, input.ids), isNull(blocks.deletedAt)))
           .for("update");
-        if (rows.length !== input.ids.length) throw notFound("Block");
+        const parentIds = found.filter((r) => r.containerType === "task").map((r) => r.containerId);
+        const parents =
+          parentIds.length > 0
+            ? await tx
+                .select({ id: tasks.id })
+                .from(tasks)
+                .where(
+                  and(
+                    inArray(tasks.id, parentIds),
+                    eq(tasks.listId, listId),
+                    isNull(tasks.deletedAt),
+                  ),
+                )
+            : [];
+        const onPage = new Set(parents.map((p) => p.id));
+        const byId = new Map(
+          found
+            .filter((r) =>
+              r.containerType === "list"
+                ? r.containerId === listId
+                : r.taskId !== null && onPage.has(r.containerId),
+            )
+            .map((r) => [r.id, r]),
+        );
+        if (byId.size !== input.ids.length) throw notFound("Block");
+        const ordered = await inPageOrder(tx, [...byId.values()]);
+        // Subtasks of a moved task travel inside it.
+        const carried = new Set<string>();
+        for (const row of ordered) {
+          if (!row.taskId) continue;
+          for (const id of await taskSubtreeIds(tx, row.taskId)) {
+            if (id !== row.taskId) carried.add(id);
+          }
+        }
+        const rows = ordered.filter((r) => !(r.taskId && carried.has(r.taskId)));
 
         const movedLists: string[] = [];
         for (const row of rows) {
@@ -707,6 +768,7 @@ export const blockRoutes = new Hono<AppEnv>()
           const [updated] = await tx
             .update(blocks)
             .set({
+              containerType: "list",
               containerId: target.list.id,
               rootListId: target.root.id,
               position: positions[i] ?? positionAfter(null),
@@ -724,6 +786,29 @@ export const blockRoutes = new Hono<AppEnv>()
         const movedTasks: string[] = [];
         for (const row of rows) {
           if (row.taskId) movedTasks.push(...(await taskSubtreeIds(tx, row.taskId)));
+        }
+        const promoted = rows.flatMap((r) =>
+          r.containerType === "task" && r.taskId ? [r.taskId] : [],
+        );
+        if (promoted.length > 0) {
+          await tx.update(tasks).set({ parentTaskId: null }).where(inArray(tasks.id, promoted));
+        }
+        const now = new Date();
+        for (const row of rows) {
+          if (!row.taskId) continue;
+          await logActivity(tx, {
+            task: {
+              id: row.taskId,
+              workspaceId: target.list.workspaceId,
+              rootListId: target.root.id,
+            },
+            actorId: user.id,
+            action: "moved",
+            field: "list",
+            old: { id: source.list.id, title: source.list.title },
+            new: { id: target.list.id, title: target.list.title },
+            now,
+          });
         }
         const bodies: BlockRow[] = [];
         if (movedTasks.length > 0) {

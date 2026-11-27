@@ -4,6 +4,7 @@ import { t } from "../../i18n/index.ts";
 import { priorityName } from "../properties/priority.ts";
 
 const names = z.array(z.string()).catch([]);
+const movedList = z.object({ title: z.string() }).catch({ title: "" });
 const list = (items: readonly string[]) => items.map((n) => `“${n}”`).join(", ");
 
 const dayFormat = new Intl.DateTimeFormat(undefined, {
@@ -54,6 +55,15 @@ export function activityText(event: ActivityEvent): string {
       if (removed.length > 0)
         return t("tasks.activity.labels_removed", { name, labels: list(removed) });
       return t("tasks.activity.labels_added", { name, labels: list(added) });
+    }
+    case "moved": {
+      const from = movedList.parse(event.old);
+      const to = movedList.parse(event.new);
+      return t("tasks.activity.moved", {
+        name,
+        from: from.title || t("lists.untitled"),
+        to: to.title || t("lists.untitled"),
+      });
     }
     default:
       return t(`tasks.activity.${event.action}`, { name });

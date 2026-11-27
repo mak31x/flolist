@@ -6,16 +6,14 @@ import {
   IconButton,
   Menu,
   MenuContent,
-  MenuItem,
   MenuTrigger,
   SkeletonSquiggle,
-  toast,
 } from "@flolist/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { Editor } from "@tiptap/core";
-import { MoreVertical, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { MoreVertical, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { t } from "../../i18n/index.ts";
 import { playCompleteSound } from "../../platform/index.ts";
 import { useMe } from "../auth/hooks.ts";
@@ -29,14 +27,16 @@ import { handleTaskFieldKey } from "../properties/shortcuts.ts";
 import { useTitleSuggestions } from "../properties/use-title-suggestions.ts";
 import { InlineEditor } from "../editor/InlineEditor.tsx";
 import { isMod } from "../editor/keys.ts";
-import type { BlockStore } from "../editor/store.ts";
 import { isDone, taskTitle } from "../editor/task-utils.ts";
 import { parentBlockOf } from "../editor/tree.ts";
 import { useBlockStore } from "../editor/use-block-store.ts";
 import { listQuery } from "../lists/api.ts";
 import { ListIcon } from "../lists/ListIcon.tsx";
 import { TaskPropertyChips } from "../properties/TaskProperties.tsx";
+import { usePicker } from "../properties/picker-store.ts";
+import type { TaskActionHost } from "./actions.tsx";
 import { ActivityLog } from "./ActivityLog.tsx";
+import { TaskMenuItems } from "./TaskMenus.tsx";
 
 export interface OpenTask {
   listId: string;
@@ -50,7 +50,7 @@ const titleEditorId = (blockId: string) => `details-title-${blockId}`;
  * chip, the body (subtasks, text, media; the list's block editor rooted at the task), and the
  * activity log. It edits the same block store as the list beside it. Due date, priority and
  * labels chips sit next to the list chip; the assignee chip and the message composer come with
- * M7.3, and the rest of the ⋮ menu with the task actions (M3.3).
+ * M7.3. The ⋮ menu holds the task actions (M3.3).
  */
 export function TaskDetails({ task }: { task: OpenTask }) {
   const navigate = useNavigate();
@@ -115,6 +115,23 @@ function Details({
   const { data: blocks } = useQuery(blocksQuery(list.id));
   const parent = blocks ? parentBlockOf(blocks, block) : undefined;
   const inline = "inline" in block.content ? block.content.inline : [];
+  const qc = useQueryClient();
+  const host = useMemo<TaskActionHost>(
+    () => ({
+      listId: list.id,
+      workspaceId: list.workspaceId,
+      qc,
+      commands,
+      all: () => store.blocks,
+      soundsEnabled: me.soundsEnabled,
+      openPicker: (b, kind) => {
+        usePicker.getState().setOpen({ blockId: b.id, scope: "details", kind });
+      },
+      // Deleted or moved away: the panel closes (a moved task lives on in its new list).
+      onGone: close,
+    }),
+    [list.id, list.workspaceId, qc, commands, store, me.soundsEnabled, close],
+  );
 
   const openTask = useCallback(
     (b: Block) => {
@@ -176,17 +193,8 @@ function Details({
               tooltip={false}
             />
           </MenuTrigger>
-          <MenuContent align="end">
-            <MenuItem
-              icon={<Trash2 />}
-              destructive
-              onSelect={() => {
-                deleteTask(store, block);
-                close();
-              }}
-            >
-              {t("tasks.details.delete")}
-            </MenuItem>
+          <MenuContent align="end" aria-label={t("tasks.actions.label")}>
+            <TaskMenuItems targets={[block]} host={host} />
           </MenuContent>
         </Menu>
       </div>
@@ -300,17 +308,4 @@ function focusFirstBlockIn(selector: string): boolean {
   if (!id) return focusFirstBlock();
   focusBlock(id, "start");
   return true;
-}
-
-/** Deletes the task's block (and so the task and its body) with an Undo toast. */
-function deleteTask(store: BlockStore, block: Block): void {
-  const inverse = store.apply([{ op: "delete", id: block.id }]);
-  toast(t("tasks.details.deleted"), {
-    action: {
-      label: t("tasks.details.undo"),
-      onAction: () => {
-        store.apply(inverse);
-      },
-    },
-  });
 }

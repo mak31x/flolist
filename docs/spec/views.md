@@ -78,6 +78,7 @@
 ## Multiselect (all task views and lists)
 - Shift-click selects a range and Mod-click toggles a row (long-press on mobile). A floating action bar appears with: Move to list · Add to/Remove from Inbox · Set due date · Assign · Label · Duplicate · Copy as text / Markdown / links · Mark complete · Delete.
 - Dragging carries the whole selection.
+- Flolist details [assumption]: a long-press is 500 ms; while a selection exists a tap toggles a row. Shift-click inside the block being edited stays a text selection. Right-clicking a selected row acts on the whole selection. Touch-first devices get long-press selection instead of the long-press context menu.
 
 ## Navigation history
 - ⌘[ goes back and ⌘] goes forward; browser history works too. Esc clears the selection, then closes the details panel, then closes menus.

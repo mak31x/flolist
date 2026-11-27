@@ -1,4 +1,5 @@
 import { DateSuggestionPopup } from "../features/properties/DateSuggestionPopup.tsx";
+import { MoveToListDialog } from "../features/tasks/MoveToListDialog.tsx";
 import { Dialog, IconButton, SheetContent, brand } from "@flolist/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Navigate, Outlet, useLocation, useMatches, useParams } from "@tanstack/react-router";
@@ -73,6 +74,7 @@ function Shell() {
   return (
     <div className="flex h-dvh overflow-hidden bg-canvas print:block print:h-auto print:overflow-visible print:bg-surface">
       <DateSuggestionPopup />
+      <MoveToListDialog />
       {!sidebarCollapsed && (
         <aside className="hidden w-[260px] shrink-0 bg-surface md:block print:hidden">
           <Sidebar />

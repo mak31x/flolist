@@ -265,11 +265,11 @@ export function formatBytes(bytes: number): string {
  * cleared, since its steps refer to blocks that now live elsewhere.
  */
 export async function moveBlocksTo(
-  ctx: KeyContext,
+  ctx: Pick<KeyContext, "qc" | "listId" | "commands">,
   ids: readonly string[],
   targetListId: string,
-): Promise<void> {
-  if (ids.length === 0 || targetListId === ctx.listId) return;
+): Promise<boolean> {
+  if (ids.length === 0 || targetListId === ctx.listId) return false;
   const source = blocksKey(ctx.listId);
   try {
     await ctx.commands.flush();
@@ -287,7 +287,20 @@ export async function moveBlocksTo(
       ctx.qc.setQueryData<Block[]>(blocksKey(targetListId), (old) =>
         old ? sortBlocks([...old.filter((b) => !ids.includes(b.id)), ...result.blocks]) : old,
       );
-      toast(t("editor.move.done", { count: ids.length }));
+      const target =
+        ctx.qc.getQueryData<{ title: string } | null>(listKey(targetListId)) ??
+        ctx.qc
+          .getQueryData<{ id: string; title: string }[]>(listsKey)
+          ?.find((l) => l.id === targetListId);
+      toast(
+        target
+          ? t("editor.move.doneTo", {
+              count: ids.length,
+              list: target.title || t("lists.untitled"),
+            })
+          : t("editor.move.done", { count: ids.length }),
+      );
+      return true;
     } catch (err) {
       ctx.qc.setQueryData(source, before);
       throw err;
@@ -295,5 +308,6 @@ export async function moveBlocksTo(
   } catch {
     toast(t("editor.move.error"));
     void ctx.qc.invalidateQueries({ queryKey: source });
+    return false;
   }
 }

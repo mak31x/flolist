@@ -19,6 +19,7 @@ import {
   numberedLabels,
   positionAfter,
   positionAt,
+  positionsBetween,
   uuidv7,
   type Block,
   type BlockContainer,
@@ -38,7 +39,7 @@ import { handleSuggestionKey } from "../properties/suggestion.ts";
 import { useDateContext } from "../properties/dates.ts";
 import { labelsQuery } from "../properties/labels-api.ts";
 import { handleTaskFieldKey } from "../properties/shortcuts.ts";
-import { editorFor } from "./focus.ts";
+import { editorFor, focusBlock } from "./focus.ts";
 import { useTitleSuggestions } from "../properties/use-title-suggestions.ts";
 import {
   TaskFieldsContext,
@@ -61,6 +62,8 @@ import {
   pasteAfterSelection,
   pasteIntoBlock,
   selectedBlocks,
+  selectedRows,
+  type BlockSelection,
   type KeyContext,
 } from "./keyboard.ts";
 import { linkRequestFor, type LinkRequest } from "./link.ts";
@@ -70,6 +73,17 @@ import { SlashMenu } from "./SlashMenu.tsx";
 import { useSlash } from "./use-slash.ts";
 import { useBlockStore } from "./use-block-store.ts";
 import { playCompleteSound } from "../../platform/index.ts";
+import { usePicker } from "../properties/picker-store.ts";
+import {
+  deleteBlocks,
+  duplicateBlocks,
+  toggleComplete,
+  type TaskActionHost,
+} from "../tasks/actions.tsx";
+import { SelectionBar } from "../tasks/SelectionBar.tsx";
+import { topLevel } from "../tasks/task-ops.ts";
+import { TaskActionsContext, type TaskActionsContextValue } from "../tasks/task-actions-context.ts";
+import { isModKey } from "./keys.ts";
 import {
   ancestorIn,
   childrenOf,
@@ -77,6 +91,7 @@ import {
   sameContainer,
   subtaskProgress,
   visibleTree,
+  withDescendants,
 } from "./tree.ts";
 
 /** Where the pointer is now, for mouse and touch drags (keyboard drags only reorder). */
@@ -133,6 +148,34 @@ function markDropTarget(el: HTMLElement | null) {
   marked?.removeAttribute("data-drop-target");
   el?.setAttribute("data-drop-target", "");
   marked = el;
+}
+
+/** Mod+Shift+D in a task title duplicates the task (keyboard-shortcuts.md, Flolist add). */
+function duplicateKey(host: TaskActionHost | null, block: Block, event: KeyboardEvent): boolean {
+  if (block.type !== "task" || !isModKey(event, "d", true) || !host) return false;
+  event.preventDefault();
+  duplicateBlocks(host, [block]);
+  return true;
+}
+
+/**
+ * Task-action keys while blocks are selected (keyboard-shortcuts.md → Task views): Mod+D
+ * completes, Mod+Shift+D duplicates, Mod+Backspace/Delete deletes, Mod+Enter opens the task.
+ */
+function selectionActionKey(
+  host: TaskActionHost,
+  selected: readonly Block[],
+  event: KeyboardEvent,
+): boolean {
+  if (isModKey(event, "d")) toggleComplete(host, selected);
+  else if (isModKey(event, "d", true)) duplicateBlocks(host, selected);
+  else if (isModKey(event, "backspace") || isModKey(event, "delete")) deleteBlocks(host, selected);
+  else if (isModKey(event, "enter")) {
+    const task = selected.find((b) => b.type === "task");
+    if (!task) return false;
+    host.openTask?.(task);
+  } else return false;
+  return true;
 }
 
 const docToInlineEmpty = (editor: Editor) => editor.state.doc.textContent.length === 0;
@@ -238,12 +281,27 @@ export function BlockEditor({
   });
   const ctxRef = useRef<KeyContext | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selection, setSelection] = useState<{ anchor: string; head: string } | null>(null);
+  const [selection, setSelection] = useState<BlockSelection | null>(null);
   const selectionRef = useRef(selection);
   const [slash, slashApi] = useSlash(() => {
     if (!ctxRef.current) throw new Error("editor context not ready");
     return ctxRef.current;
   });
+  // The store's blocks are current the moment a command applies; rendered rows may lag a
+  // frame. Only an empty list's placeholder comes from the rendered rows.
+  const rowsNow = () => {
+    const tree = visibleTree(store.blocks, root, collapsedRef.current);
+    if (tree.rows.length === 0) return rowsRef.current;
+    // Rows hidden by the view's filters are skipped (arrows still follow stored order).
+    return viewBlocks(tree.rows, { ...viewRef.current, sort: "manual" }, tree.depth);
+  };
+  const select = (next: BlockSelection) => {
+    selectionRef.current = next;
+    setSelection(next);
+    // Keys go to the container while blocks are selected.
+    containerRef.current?.focus({ preventScroll: true });
+    document.querySelector(`[data-block-id="${next.head}"]`)?.scrollIntoView({ block: "nearest" });
+  };
   const [ctx] = useState<KeyContext>(() => ({
     listId,
     rootListId,
@@ -258,14 +316,7 @@ export function BlockEditor({
       if (!list) throw new Error("list is gone");
       return list.workspaceId;
     },
-    // The store's blocks are current the moment a command applies; rendered rows may lag a
-    // frame. Only an empty list's placeholder comes from the rendered rows.
-    rows: () => {
-      const tree = visibleTree(store.blocks, root, collapsedRef.current);
-      if (tree.rows.length === 0) return rowsRef.current;
-      // Rows hidden by the view's filters are skipped (arrows still follow stored order).
-      return viewBlocks(tree.rows, { ...viewRef.current, sort: "manual" }, tree.depth);
-    },
+    rows: rowsNow,
     all: () => store.blocks,
     openTask: (block) => {
       openTaskRef.current?.(block);
@@ -279,11 +330,22 @@ export function BlockEditor({
     selection: {
       get: () => selectionRef.current,
       set: (anchor, head) => {
-        selectionRef.current = { anchor, head };
-        setSelection(selectionRef.current);
-        // Keys go to the container while blocks are selected.
-        containerRef.current?.focus({ preventScroll: true });
-        document.querySelector(`[data-block-id="${head}"]`)?.scrollIntoView({ block: "nearest" });
+        select({ anchor, head });
+      },
+      toggle: (id) => {
+        const ids = selectedRows(selectionRef.current, rowsNow()).map((b) => b.id);
+        const next = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+        if (next.length === 0) {
+          selectionRef.current = null;
+          setSelection(null);
+          return;
+        }
+        select({ anchor: id, head: id, ids: next });
+      },
+      setIds: (ids) => {
+        const [first] = ids;
+        if (!first) return;
+        select({ anchor: first, head: ids.at(-1) ?? first, ids });
       },
       clear: () => {
         selectionRef.current = null;
@@ -300,8 +362,10 @@ export function BlockEditor({
   useLayoutEffect(() => {
     dateRef.current = { today: dateCtx.now.date, timeZone: dateCtx.timeZone };
   });
+  const hostRef = useRef<TaskActionHost | null>(null);
   const onKeyDown = useCallback(
     (block: Block, event: KeyboardEvent, editor: Editor) =>
+      duplicateKey(hostRef.current, block, event) ||
       (block.type === "task" &&
         (handleSuggestionKey(block.id, event) ||
           handleTaskFieldKey(event, block, "row", {
@@ -436,6 +500,58 @@ export function BlockEditor({
         : null,
     [workspaceOfList, store, ctx],
   );
+  const host = useMemo<TaskActionHost>(
+    () => ({
+      listId,
+      workspaceId: workspaceOfList,
+      qc,
+      commands: ctx.commands,
+      all: () => store.blocks,
+      soundsEnabled: me.soundsEnabled,
+      openTask: (block) => {
+        openTaskRef.current?.(block);
+      },
+      openPicker: (block, kind) => {
+        ctx.selection.clear();
+        usePicker.getState().setOpen({ blockId: block.id, scope: "row", kind });
+      },
+      onGone: () => {
+        ctx.selection.clear();
+      },
+      onDuplicated: (ids) => {
+        // A duplicated selection stays selected as its copies; one copy gets the caret.
+        if (selectionRef.current) ctx.selection.setIds(ids);
+        else if (ids[0]) focusBlock(ids[0], "end");
+      },
+    }),
+    [listId, workspaceOfList, qc, ctx, store, me.soundsEnabled],
+  );
+  useLayoutEffect(() => {
+    hostRef.current = host;
+  });
+  const taskActions = useMemo<TaskActionsContextValue>(
+    () => ({
+      host,
+      targetsFor: (block) => {
+        const selected = selectionRef.current ? selectedBlocks(ctx) : [];
+        return selected.some((b) => b.id === block.id) ? selected : [block];
+      },
+    }),
+    [host, ctx],
+  );
+  const onSelectClick = useCallback(
+    (block: Block, mode: "toggle" | "range") => {
+      if (mode === "toggle") {
+        ctx.selection.toggle(block.id);
+        return;
+      }
+      // Shift-click: from the selection's anchor, else the block being edited, else this one.
+      const focused =
+        document.activeElement?.closest<HTMLElement>("[data-block-id]")?.dataset.blockId;
+      ctx.selection.set(selectionRef.current?.anchor ?? focused ?? block.id, block.id);
+    },
+    [ctx],
+  );
   const onCollapse = useCallback((block: Block) => {
     setCollapsed((old) => {
       const next = new Set(old);
@@ -467,26 +583,85 @@ export function BlockEditor({
     },
     [store],
   );
+  /**
+   * A dragged selection lands together where the dragged row would: tasks may change
+   * container, other blocks only move when the target is their own container.
+   */
+  const moveGroup = useCallback(
+    (group: readonly Block[], moving: Block, overRow: Block) => {
+      const all = store.blocks;
+      const reference =
+        moving.type === "task" || sameContainer(containerOf(moving), overRow)
+          ? overRow
+          : ancestorIn(all, containerOf(moving), overRow);
+      if (!reference) return;
+      // Never into one of the moved tasks' own bodies.
+      if (
+        withDescendants(
+          all,
+          group.map((b) => b.id),
+        ).has(reference.id)
+      )
+        return;
+      const dest = containerOf(reference);
+      const movable = group.filter((b) => b.type === "task" || sameContainer(dest, b));
+      const ids = new Set(movable.map((b) => b.id));
+      const siblings = childrenOf(all, dest).filter((b) => !ids.has(b.id));
+      const visible = ctx.rows();
+      const down =
+        visible.findIndex((b) => b.id === moving.id) <
+        visible.findIndex((b) => b.id === overRow.id);
+      const index = siblings.findIndex((b) => b.id === reference.id) + (down ? 1 : 0);
+      const positions = positionsBetween(
+        siblings[index - 1]?.position ?? null,
+        siblings[index]?.position ?? null,
+        movable.length,
+      );
+      ctx.commands.run(
+        movable.map((b, i) => ({
+          op: "upsert",
+          id: b.id,
+          fields: {
+            position: positions[i] ?? b.position,
+            ...(sameContainer(dest, b) ? {} : { container: dest }),
+          },
+        })),
+      );
+    },
+    [ctx, store],
+  );
   const onDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
       const target = dropTargetAt(event, store.blocks);
       markDropTarget(null);
       setInto(false);
+      const all = store.blocks;
+      const moving = store.get(String(active.id));
+      // Dragging a selected row carries the whole selection (views.md → Multiselect).
+      const selected = selectionRef.current ? selectedBlocks(ctx) : [];
+      const group =
+        moving && selected.some((b) => b.id === moving.id) ? topLevel(all, selected) : [];
       // Dropped on a sublist row or a sidebar list: the block moves into that list.
       if (target) {
         const listOf = target.dataset.dropListId;
-        const moving = store.get(String(active.id));
-        if (listOf && moving && listOf !== listId && moving.sublistId !== listOf) {
-          void moveBlocksTo(ctx, [moving.id], listOf);
+        const ids = (group.length > 0 ? group : moving ? [moving] : [])
+          .filter((b) => b.sublistId !== listOf)
+          .map((b) => b.id);
+        if (listOf && listOf !== listId && ids.length > 0) {
+          void moveBlocksTo(ctx, ids, listOf).then((moved) => {
+            if (moved) ctx.selection.clear();
+          });
         }
         return;
       }
       if (!over || active.id === over.id) return;
-      const all = store.blocks;
-      const moving = store.get(String(active.id));
       const overRow = store.get(String(over.id));
       if (!moving || !overRow) return;
+      if (group.length > 1) {
+        moveGroup(group, moving, overRow);
+        return;
+      }
       // A task can land among another container's subtasks; other blocks stay in their own
       // container, next to the over row's ancestor there.
       const reference =
@@ -509,7 +684,7 @@ export function BlockEditor({
         },
       ]);
     },
-    [ctx, store, listId],
+    [ctx, store, listId, moveGroup],
   );
   const onRequestLink = useCallback((editor: Editor) => {
     setLink(linkRequestFor(editor));
@@ -538,13 +713,31 @@ export function BlockEditor({
       tabIndex={-1}
       className="flex flex-col pb-24 outline-none"
       onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
+        // The action bar's buttons take the task-action keys and Esc too.
+        const inBar =
+          e.target instanceof Element && e.target.closest("[data-selection-bar]") !== null;
+        if (e.target !== e.currentTarget && !inBar) return;
+        if (selectionRef.current && selectionActionKey(host, selectedBlocks(ctx), e.nativeEvent)) {
+          e.preventDefault();
+          return;
+        }
+        if (inBar) {
+          if (e.key === "Escape" && selectionRef.current) {
+            e.preventDefault();
+            const head = selectionRef.current.head;
+            ctx.selection.clear();
+            focusBlock(head, "end");
+          }
+          return;
+        }
         if (handleSelectionKey(ctx, e.nativeEvent)) e.preventDefault();
       }}
       onBlur={(e) => {
-        // Clicking elsewhere ends the selection (focus moving into a block is handled there).
-        if (!e.currentTarget.contains(e.relatedTarget) && selectionRef.current)
-          ctx.selection.clear();
+        // Clicking elsewhere ends the selection (focus moving into a block is handled there);
+        // the action bar's menus, pickers and dialogs keep it.
+        const to = e.relatedTarget;
+        const kept = to instanceof Element && to.closest("[data-keep-selection]") !== null;
+        if (!e.currentTarget.contains(to) && !kept && selectionRef.current) ctx.selection.clear();
       }}
       onCopy={(e) => {
         if (!selectionRef.current) return;
@@ -579,56 +772,71 @@ export function BlockEditor({
       <p aria-live="polite" className="sr-only">
         {selection ? t("editor.selection.count", { count: selectedBlocks(ctx).length }) : ""}
       </p>
-      <TaskFieldsContext.Provider value={taskFields}>
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragMove={onDragMove}
-          onDragEnd={onDragEnd}
-          onDragCancel={() => {
-            markDropTarget(null);
-            setInto(false);
+      {selection && rootType === "list" && (
+        <SelectionBar
+          selected={selectedBlocks(ctx)}
+          host={host}
+          onClear={() => {
+            const head = selectionRef.current?.head;
+            ctx.selection.clear();
+            if (head) focusBlock(head, "end");
           }}
-        >
-          <SortableContext
-            items={shown.map((b) => b.id)}
-            strategy={into ? holdStill : verticalListSortingStrategy}
+        />
+      )}
+      <TaskActionsContext.Provider value={taskActions}>
+        <TaskFieldsContext.Provider value={taskFields}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragMove={onDragMove}
+            onDragEnd={onDragEnd}
+            onDragCancel={() => {
+              markDropTarget(null);
+              setInto(false);
+            }}
           >
-            {view.tasksOnly && shown.length === 0 && (
-              <p className="py-2 text-body text-text-muted">{t("lists.view.noTasks")}</p>
-            )}
-            {shown.map((block) => (
-              <BlockRow
-                key={block.id}
-                block={block}
-                saved={!empty}
-                depth={tree?.depth.get(block.id)}
-                progress={
-                  block.taskId && blocks ? subtaskProgress(blocks, block.taskId) : undefined
-                }
-                collapsed={collapsed.has(block.id)}
-                onCollapse={onCollapse}
-                onComplete={onComplete}
-                onOpenTask={onOpenTask ? openTask : undefined}
-                draggable={!sorted}
-                selected={selectedIds.has(block.id)}
-                onPaste={onPaste}
-                onHistory={onHistory}
-                onAction={onAction}
-                number={numbers.get(block.id)}
-                placeholder={onlyEmpty ? (placeholder ?? t("editor.placeholder")) : undefined}
-                onChange={onChange}
-                onKeyDown={onKeyDown}
-                onDividerKeyDown={onDividerKeyDown}
-                onRequestLink={onRequestLink}
-                onFocus={onFocus}
-                onCaption={onCaption}
-                ready={ready}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-      </TaskFieldsContext.Provider>
+            <SortableContext
+              items={shown.map((b) => b.id)}
+              strategy={into ? holdStill : verticalListSortingStrategy}
+            >
+              {view.tasksOnly && shown.length === 0 && (
+                <p className="py-2 text-body text-text-muted">{t("lists.view.noTasks")}</p>
+              )}
+              {shown.map((block) => (
+                <BlockRow
+                  key={block.id}
+                  block={block}
+                  saved={!empty}
+                  depth={tree?.depth.get(block.id)}
+                  progress={
+                    block.taskId && blocks ? subtaskProgress(blocks, block.taskId) : undefined
+                  }
+                  collapsed={collapsed.has(block.id)}
+                  onCollapse={onCollapse}
+                  onComplete={onComplete}
+                  onOpenTask={onOpenTask ? openTask : undefined}
+                  draggable={!sorted}
+                  selected={selectedIds.has(block.id)}
+                  selecting={selection !== null}
+                  onSelectClick={onSelectClick}
+                  onPaste={onPaste}
+                  onHistory={onHistory}
+                  onAction={onAction}
+                  number={numbers.get(block.id)}
+                  placeholder={onlyEmpty ? (placeholder ?? t("editor.placeholder")) : undefined}
+                  onChange={onChange}
+                  onKeyDown={onKeyDown}
+                  onDividerKeyDown={onDividerKeyDown}
+                  onRequestLink={onRequestLink}
+                  onFocus={onFocus}
+                  onCaption={onCaption}
+                  ready={ready}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        </TaskFieldsContext.Provider>
+      </TaskActionsContext.Provider>
       {pending
         .filter((u) => u.listId === listId)
         .map((u) => (
