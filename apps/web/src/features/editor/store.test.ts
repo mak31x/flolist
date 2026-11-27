@@ -440,7 +440,13 @@ describe("BlockStore tasks", () => {
     ]);
     const row = cache().find((b) => b.id === id(3));
     expect(row?.taskId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(row?.task).toEqual({ completedAt: null, completedBy: null });
+    expect(row?.task).toEqual({
+      completedAt: null,
+      completedBy: null,
+      due: null,
+      priority: 0,
+      labelIds: [],
+    });
     await store.flush();
     expect(server.calls[0]?.ops[0]).toMatchObject({ op: "upsert", task: { id: row?.taskId } });
   });
@@ -449,7 +455,7 @@ describe("BlockStore tasks", () => {
     const task = block(1, {
       type: "task",
       taskId: id(91),
-      task: { completedAt: null, completedBy: null },
+      task: { completedAt: null, completedBy: null, due: null, priority: 0, labelIds: [] },
     });
     const { store, server, cache } = setup([task], { userId: id(50) });
     const inverse = store.apply([{ op: "upsert", id: id(1), fields: { completed: true } }]);
@@ -485,7 +491,7 @@ describe("BlockStore tasks", () => {
     const task = block(1, {
       type: "task",
       taskId: id(91),
-      task: { completedAt: null, completedBy: null },
+      task: { completedAt: null, completedBy: null, due: null, priority: 0, labelIds: [] },
     });
     const { store, cache } = setup([task]);
     const inverse = store.apply([{ op: "upsert", id: id(1), fields: { type: "paragraph" } }]);
@@ -501,7 +507,7 @@ describe("live task-body events", () => {
     const parent = block(1, {
       type: "task",
       taskId: id(91),
-      task: { completedAt: null, completedBy: null },
+      task: { completedAt: null, completedBy: null, due: null, priority: 0, labelIds: [] },
     });
     qc.setQueryData(blocksKey(listId), [parent]);
     const sub = block(2, { containerType: "task", containerId: id(91), version: 3 });

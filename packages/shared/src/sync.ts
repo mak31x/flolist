@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { blockSchema } from "./blocks.ts";
 import { taskSchema } from "./tasks.ts";
+import { labelSchema } from "./labels.ts";
 import { listSchema, listViewPrefsSchema, sectionSchema, sidebarEntrySchema } from "./lists.ts";
 
 /**
@@ -67,8 +68,16 @@ export const changeEventSchema = z.union([
   }),
   z.object({
     ...changeBase,
+    op: z.literal("upsert"),
+    /** A workspace label (`workspace:<id>`). */
+    entity: z.literal("label"),
+    id: z.uuid(),
+    data: labelSchema,
+  }),
+  z.object({
+    ...changeBase,
     op: z.literal("delete"),
-    entity: z.enum(["list", "section", "sidebarEntry", "block", "task"]),
+    entity: z.enum(["list", "section", "sidebarEntry", "block", "task", "label"]),
     id: z.uuid(),
   }),
 ]);

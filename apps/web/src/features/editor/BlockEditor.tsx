@@ -34,6 +34,16 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMe } from "../auth/hooks.ts";
 import { t } from "../../i18n/index.ts";
 import { listQuery } from "../lists/api.ts";
+import { handleSuggestionKey } from "../properties/suggestion.ts";
+import { useDateContext } from "../properties/dates.ts";
+import { labelsQuery } from "../properties/labels-api.ts";
+import { handleTaskFieldKey } from "../properties/shortcuts.ts";
+import { editorFor } from "./focus.ts";
+import { useTitleSuggestions } from "../properties/use-title-suggestions.ts";
+import {
+  TaskFieldsContext,
+  type TaskFieldsContextValue,
+} from "../properties/task-fields-context.ts";
 import { isSorted, viewBlocks } from "../lists/list-view.ts";
 import { blocksQuery } from "./api.ts";
 import { insertFiles, moveBlocksTo, usePendingUploads } from "./media.ts";
@@ -179,6 +189,7 @@ export function BlockEditor({
   const me = useMe();
   const qc = useQueryClient();
   const { data: blocks } = useQuery(blocksQuery(listId));
+  const { data: labels } = useQuery(labelsQuery);
   const pending = usePendingUploads((s) => s.items);
   const store = useBlockStore(listId, rootListId, me.id);
   const [phantomId, setPhantomId] = useState(uuidv7);
@@ -207,8 +218,11 @@ export function BlockEditor({
   }, [tree, phantomId, root, rootListId]);
   const numbers = useMemo(() => numberedLabels(rows ?? []), [rows]);
   const shown = useMemo(
-    () => (rows ? viewBlocks(rows, view, tree?.depth, me.id) : []),
-    [rows, view, tree, me.id],
+    () =>
+      rows
+        ? viewBlocks(rows, view, tree?.depth, me.id, (id) => labels?.find((l) => l.id === id)?.name)
+        : [],
+    [rows, view, tree, me.id, labels],
   );
   const sorted = isSorted(view);
 
@@ -280,8 +294,22 @@ export function BlockEditor({
   useLayoutEffect(() => {
     ctxRef.current = ctx;
   }, [ctx]);
+  const suggest = useTitleSuggestions();
+  const dateCtx = useDateContext();
+  const dateRef = useRef({ today: dateCtx.now.date, timeZone: dateCtx.timeZone });
+  useLayoutEffect(() => {
+    dateRef.current = { today: dateCtx.now.date, timeZone: dateCtx.timeZone };
+  });
   const onKeyDown = useCallback(
     (block: Block, event: KeyboardEvent, editor: Editor) =>
+      (block.type === "task" &&
+        (handleSuggestionKey(block.id, event) ||
+          handleTaskFieldKey(event, block, "row", {
+            ...dateRef.current,
+            setFields: (fields) => {
+              ctx.commands.run([{ op: "upsert", id: block.id, fields }]);
+            },
+          }))) ||
       handleBlockKey(ctx, block, event, editor),
     [ctx],
   );
@@ -313,8 +341,14 @@ export function BlockEditor({
         { delay: "typing", coalesce: block.id },
       );
       slashApi.update(block.id);
+      const editor = block.type === "task" ? editorFor(block.id) : undefined;
+      if (editor) {
+        suggest(block.id, editor, (due) => {
+          ctx.commands.run([{ op: "upsert", id: block.id, fields: { due } }]);
+        });
+      }
     },
-    [store, ctx, slashApi],
+    [store, ctx, slashApi, suggest],
   );
   const onHistory = useCallback(
     (action: "undo" | "redo") => {
@@ -386,6 +420,21 @@ export function BlockEditor({
       if (completed && me.soundsEnabled) playCompleteSound();
     },
     [ctx, store, me.soundsEnabled],
+  );
+  const { data: listRow } = useQuery(listQuery(listId));
+  const workspaceOfList = listRow?.workspaceId;
+  const taskFields = useMemo<TaskFieldsContextValue | null>(
+    () =>
+      workspaceOfList
+        ? {
+            workspaceId: workspaceOfList,
+            setFields: (block, fields) => {
+              if (!store.get(block.id)) return;
+              ctx.commands.run([{ op: "upsert", id: block.id, fields }]);
+            },
+          }
+        : null,
+    [workspaceOfList, store, ctx],
   );
   const onCollapse = useCallback((block: Block) => {
     setCollapsed((old) => {
@@ -530,52 +579,56 @@ export function BlockEditor({
       <p aria-live="polite" className="sr-only">
         {selection ? t("editor.selection.count", { count: selectedBlocks(ctx).length }) : ""}
       </p>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragMove={onDragMove}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => {
-          markDropTarget(null);
-          setInto(false);
-        }}
-      >
-        <SortableContext
-          items={shown.map((b) => b.id)}
-          strategy={into ? holdStill : verticalListSortingStrategy}
+      <TaskFieldsContext.Provider value={taskFields}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => {
+            markDropTarget(null);
+            setInto(false);
+          }}
         >
-          {view.tasksOnly && shown.length === 0 && (
-            <p className="py-2 text-body text-text-muted">{t("lists.view.noTasks")}</p>
-          )}
-          {shown.map((block) => (
-            <BlockRow
-              key={block.id}
-              block={block}
-              saved={!empty}
-              depth={tree?.depth.get(block.id)}
-              progress={block.taskId && blocks ? subtaskProgress(blocks, block.taskId) : undefined}
-              collapsed={collapsed.has(block.id)}
-              onCollapse={onCollapse}
-              onComplete={onComplete}
-              onOpenTask={onOpenTask ? openTask : undefined}
-              draggable={!sorted}
-              selected={selectedIds.has(block.id)}
-              onPaste={onPaste}
-              onHistory={onHistory}
-              onAction={onAction}
-              number={numbers.get(block.id)}
-              placeholder={onlyEmpty ? (placeholder ?? t("editor.placeholder")) : undefined}
-              onChange={onChange}
-              onKeyDown={onKeyDown}
-              onDividerKeyDown={onDividerKeyDown}
-              onRequestLink={onRequestLink}
-              onFocus={onFocus}
-              onCaption={onCaption}
-              ready={ready}
-            />
-          ))}
-        </SortableContext>
-      </DndContext>
+          <SortableContext
+            items={shown.map((b) => b.id)}
+            strategy={into ? holdStill : verticalListSortingStrategy}
+          >
+            {view.tasksOnly && shown.length === 0 && (
+              <p className="py-2 text-body text-text-muted">{t("lists.view.noTasks")}</p>
+            )}
+            {shown.map((block) => (
+              <BlockRow
+                key={block.id}
+                block={block}
+                saved={!empty}
+                depth={tree?.depth.get(block.id)}
+                progress={
+                  block.taskId && blocks ? subtaskProgress(blocks, block.taskId) : undefined
+                }
+                collapsed={collapsed.has(block.id)}
+                onCollapse={onCollapse}
+                onComplete={onComplete}
+                onOpenTask={onOpenTask ? openTask : undefined}
+                draggable={!sorted}
+                selected={selectedIds.has(block.id)}
+                onPaste={onPaste}
+                onHistory={onHistory}
+                onAction={onAction}
+                number={numbers.get(block.id)}
+                placeholder={onlyEmpty ? (placeholder ?? t("editor.placeholder")) : undefined}
+                onChange={onChange}
+                onKeyDown={onKeyDown}
+                onDividerKeyDown={onDividerKeyDown}
+                onRequestLink={onRequestLink}
+                onFocus={onFocus}
+                onCaption={onCaption}
+                ready={ready}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+      </TaskFieldsContext.Provider>
       {pending
         .filter((u) => u.listId === listId)
         .map((u) => (

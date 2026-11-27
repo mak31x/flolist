@@ -4,6 +4,7 @@ import {
   lists,
   listViewPrefs,
   sidebarEntries,
+  taskLabels,
   tasks,
   workspaces,
 } from "@flolist/db";
@@ -502,7 +503,8 @@ async function copyTree(
     created.push(row);
   }
 
-  // Tasks keep their title and completion [assumption: an exact copy]; parents go first.
+  // Tasks keep their fields (title, completion, due date, priority, labels) [assumption: an
+  // exact copy]; parents go first.
   const depth = (t: (typeof sourceTasks)[number]): number => {
     let d = 0;
     for (let p = t.parentTaskId; p && d < 64; d++) {
@@ -523,7 +525,28 @@ async function copyTree(
         titleInline: t.titleInline,
         completedAt: t.completedAt,
         completedBy: t.completedBy,
+        dueDate: t.dueDate,
+        dueTime: t.dueTime,
+        dueTz: t.dueTz,
+        priority: t.priority,
         createdBy: userId,
+      })),
+    );
+  }
+  // Labels belong to the workspace, which the copy shares, so they carry over as they are.
+  const sourceLabels =
+    taskIds.size === 0
+      ? []
+      : await tx
+          .select()
+          .from(taskLabels)
+          .where(inArray(taskLabels.taskId, [...taskIds.keys()]));
+  for (let i = 0; i < sourceLabels.length; i += 500) {
+    await tx.insert(taskLabels).values(
+      sourceLabels.slice(i, i + 500).map((l) => ({
+        taskId: taskIds.get(l.taskId) ?? l.taskId,
+        labelId: l.labelId,
+        createdAt: l.createdAt,
       })),
     );
   }

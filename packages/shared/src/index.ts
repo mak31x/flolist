@@ -10,4 +10,7 @@ export * from "./lists.ts";
 export * from "./sync.ts";
 export * from "./blocks.ts";
 export * from "./markdown.ts";
+export * from "./task-fields.ts";
 export * from "./tasks.ts";
+export * from "./dates/index.ts";
+export * from "./labels.ts";

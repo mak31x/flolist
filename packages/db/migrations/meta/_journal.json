@@ -50,6 +50,13 @@
       "when": 1795683501155,
       "tag": "0006_tasks_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795732505115,
+      "tag": "0007_due_priority_labels",
+      "breakpoints": true
     }
   ]
 }

@@ -22,7 +22,11 @@ import { useMe } from "../auth/hooks.ts";
 import { blocksQuery } from "../editor/api.ts";
 import { BlockEditor } from "../editor/BlockEditor.tsx";
 import { EditorCommands } from "../editor/commands.ts";
-import { focusFirstBlock, focusBlock } from "../editor/focus.ts";
+import { editorFor, focusFirstBlock, focusBlock } from "../editor/focus.ts";
+import { handleSuggestionKey } from "../properties/suggestion.ts";
+import { useDateContext } from "../properties/dates.ts";
+import { handleTaskFieldKey } from "../properties/shortcuts.ts";
+import { useTitleSuggestions } from "../properties/use-title-suggestions.ts";
 import { InlineEditor } from "../editor/InlineEditor.tsx";
 import { isMod } from "../editor/keys.ts";
 import type { BlockStore } from "../editor/store.ts";
@@ -31,6 +35,7 @@ import { parentBlockOf } from "../editor/tree.ts";
 import { useBlockStore } from "../editor/use-block-store.ts";
 import { listQuery } from "../lists/api.ts";
 import { ListIcon } from "../lists/ListIcon.tsx";
+import { TaskPropertyChips } from "../properties/TaskProperties.tsx";
 import { ActivityLog } from "./ActivityLog.tsx";
 
 export interface OpenTask {
@@ -43,9 +48,9 @@ const titleEditorId = (blockId: string) => `details-title-${blockId}`;
 /**
  * Task details (ui-design §5): close and ⋮ menu, a large checkbox and the title, the list
  * chip, the body (subtasks, text, media; the list's block editor rooted at the task), and the
- * activity log. It edits the same block store as the list beside it. The other property chips
- * arrive with their fields (M3.2, M7.3), the message composer with M7.3, and the rest of the ⋮
- * menu with the task actions (M3.3).
+ * activity log. It edits the same block store as the list beside it. Due date, priority and
+ * labels chips sit next to the list chip; the assignee chip and the message composer come with
+ * M7.3, and the rest of the ⋮ menu with the task actions (M3.3).
  */
 export function TaskDetails({ task }: { task: OpenTask }) {
   const navigate = useNavigate();
@@ -93,7 +98,13 @@ function Details({
   close,
 }: {
   block: Block;
-  list: { id: string; rootListId: string; title: string; emoji: string | null };
+  list: {
+    id: string;
+    rootListId: string;
+    workspaceId: string;
+    title: string;
+    emoji: string | null;
+  };
   close: () => void;
 }) {
   const navigate = useNavigate();
@@ -116,7 +127,21 @@ function Details({
     [navigate, list.id],
   );
 
+  const suggest = useTitleSuggestions();
+  const dateCtx = useDateContext();
   const onTitleKey = (event: KeyboardEvent, editor: Editor) => {
+    if (handleSuggestionKey(titleEditorId(block.id), event)) return true;
+    if (
+      handleTaskFieldKey(event, block, "details", {
+        today: dateCtx.now.date,
+        timeZone: dateCtx.timeZone,
+        setFields: (fields) => {
+          commands.run([{ op: "upsert", id: block.id, fields }]);
+        },
+      })
+    ) {
+      return true;
+    }
     if (event.key === "Enter" && !event.shiftKey && !isMod(event)) {
       // The title is one line; Enter moves into the body.
       event.preventDefault();
@@ -209,6 +234,12 @@ function Details({
                     coalesce: block.id,
                   },
                 );
+                const editor = editorFor(titleEditorId(block.id));
+                if (editor) {
+                  suggest(titleEditorId(block.id), editor, (due) => {
+                    commands.run([{ op: "upsert", id: block.id, fields: { due } }]);
+                  });
+                }
               }}
               onKeyDown={onTitleKey}
               onRequestLink={() => undefined}
@@ -229,6 +260,16 @@ function Details({
           >
             {list.title || t("lists.untitled")}
           </Chip>
+          {list.workspaceId && (
+            <TaskPropertyChips
+              block={block}
+              workspaceId={list.workspaceId}
+              returnFocusTo={titleEditorId(block.id)}
+              onFields={(fields) => {
+                commands.run([{ op: "upsert", id: block.id, fields }]);
+              }}
+            />
+          )}
         </div>
 
         <div data-task-body className="mt-4 pl-[54px] md:pl-[54px]">
@@ -245,7 +286,7 @@ function Details({
         </div>
 
         <hr className="my-2 border-border" />
-        <ActivityLog taskId={taskId} />
+        <ActivityLog taskId={taskId} version={block.version} />
       </div>
     </div>
   );

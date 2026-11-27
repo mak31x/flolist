@@ -4,12 +4,13 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M3.1 Task blocks + details panel (done; PR from `phase/M3.1-task-blocks`). D-056–D-062.
-- **State:** migration 0006 adds `tasks`, `activity_events`, `blocks.task_id` (unique; CHECK: set exactly on `task` blocks) and `user_settings.getting_started_seeded_at`. A task block's content is the title (`tasks.title_inline` + plain `title` mirror it); the block DTO carries `taskId` + `task: {completedAt, completedBy}`. Subtasks are task blocks in a task's body (`container_type='task'`); `GET /lists/:id/blocks` returns the list's blocks **plus its tasks' bodies**, and the one batch route edits them all (`task: {id, completed}`, `container` on upsert/move; depth ≤ 4). Deleting a task block trashes its subtree (trash root = block); turning it into text trashes the task, undo restores it. New routes: `GET|PATCH /tasks/:id`, `GET /tasks/:id/activity`; `task` live events. `/me` seeds "Getting started" once (backfill for old accounts) and exposes `soundsEnabled`.
-- **Web:** `editor/tree.ts` (`visibleTree`, `placeNear`, `subtaskProgress`, `ancestorIn`, `withDescendants`) — editors render the visible tree, never the raw cache. Store fields `taskId`/`completed`/`container`; one shared store per list page (`use-block-store.ts`, ref-counted). Task rows reuse the text-row layout (`TaskRow.tsx` marker/trailing) so Turn into keeps the editor mounted. `features/tasks/` (TaskDetails panel = BlockEditor rooted at `{type:"task"}`, ActivityLog). `lists/list-view.ts` filters/sorts with depth; `editor/reopen.ts` (Mark all incomplete); `platform.playCompleteSound`.
-- **Run / verify:** `pnpm infra:up`, `pnpm db:migrate`, `pnpm dev`; in a list type `[] ` + text, Enter, Tab / Shift+Tab, click checkboxes, ⌘/Ctrl+D, ⌘/Ctrl+Enter or the row arrow (details), funnel → Hide completed / sorts, ⋮ → Mark all incomplete. `pnpm check`; `pnpm test:e2e` (tasks.spec.ts).
-- **Gotchas:** new blocks need same-container positions (`placeNear`/`ctx.all()`), not neighbours of visible rows. Live upserts of body blocks find their page by the parent task's block (`pageOf` in store.ts). New accounts start with "Getting started" in Favorites — e2e list assertions filter it out (`SEEDED`). The built-in browser pane's `type`/key actions don't fire real keydowns: verify typing with Playwright. Stop preview dev servers before `pnpm test:e2e` (a reused API keeps the 10/min sign-up limit).
-- **Next:** M3.2 Dates, priority, labels, natural language (add the due/priority/label columns + chips; the panel's chip row and the row's edit icon row are waiting for them).
+- **Last phase:** M3.2 Dates, priority, labels, natural language (done; branch `phase/M3.2-dates-priority-labels`). D-063–D-070.
+- **State:** migration 0007 adds `tasks.due_date|due_time|due_tz` (CHECK: date ⇔ tz, time needs date) and `priority` (0–3), plus `labels` (unique `lower(name)` per workspace, optional colour) and `task_labels`. Task DTO and block `task` carry `due {date,time,tz}`, `priority`, `labelIds`; PATCH `/tasks/:id` and the batch upsert `task: {...}` set them (tz defaults to the profile zone), logging `due_changed|priority_changed|labels_changed`. New `/labels` routes (GET/POST/PATCH merge/DELETE), `label` events on `workspace:<id>`, matrix actions `workspace.useLabels|manageLabels`.
+- **Shared:** `dates/` (`parseNaturalDate`/`findNaturalDates`/`removeNaturalDate`, `formatDue`, `isOverdue`, civil-date helpers), `task-fields.ts` (kept apart from tasks.ts to avoid a blocks↔tasks import cycle), `labels.ts`.
+- **Web:** `features/properties/` — DatePicker, LabelPicker, TaskProperties (details chips + row `TaskMetaLine`), `suggestion.ts` + `DateSuggestionPopup` (mounted once in AppShell), `shortcuts.ts`, `picker-store.ts` (opens pickers from keys), `labels-api.ts`, LabelsTab. BlockEditor provides `TaskFieldsContext`; BlockStore fields gained `due`/`priority`/`labelIds`.
+- **Run / verify:** `pnpm infra:up`, `pnpm db:migrate`, `pnpm dev`; in a list type `[] pay rent tomorrow at 5pm` → Return; Mod+Enter → Due/Priority/Labels chips; ^D / ^L in a title; Settings → Labels. `pnpm check`; `pnpm test:e2e` (dates.spec.ts).
+- **Gotchas:** text offsets in a title map to ProseMirror positions as `offset + 1` (one paragraph, hard breaks = 1 char via `textBetween(…, "\n", "\n")`). A task can only reference saved labels: the picker awaits the create before setting `labelIds`. The activity log also refetches when the task block's version changes (WS echoes lag under load). Other projects' dev servers on this machine can slow e2e to timeouts.
+- **Next:** M3.3 Task actions + multiselect.
 ---
 
 ## M0 — Foundation and walking skeleton
@@ -75,10 +76,12 @@ Specs: spec/tasks.md (properties, creating, subtasks), spec/ui-design.md (§4 ta
 - [x] ⋮ Mark all incomplete (moved from M2.3); make "Show tasks only"/"Hide completed" and the task-field sorts work in `viewBlocks`; open-task count on sublist rows
 - [x] Seed a "Getting started" list on sign-up (moved from M1.1; spec/settings-and-account.md → Authentication screens), with a backfill for users who signed up before it existed
 - Left for later phases: the other property chips (M3.2, M7.3), the details ⋮ actions beyond Delete and Copy-as-Markdown with nested subtasks (M3.3), the message composer (M7.3). Mod+D (complete) was pulled in from M3.3 so the checkbox is keyboard-reachable.
-### M3.2 Dates, priority, labels, natural language `[ ]`
+### M3.2 Dates, priority, labels, natural language `[x]`
 Specs: spec/tasks.md (NL dates, due dates, labels, priority), spec/ui-design.md §6
-- [ ] Date picker popover; chrono-node wrapper + fixtures; suggestion popover; priority + labels + Settings → Labels
-Done when: typing "pay rent tomorrow at 5pm" sets the date and strips that text from the title.
+- [x] Date picker popover; chrono-node wrapper + fixtures; suggestion popover; priority + labels + Settings → Labels
+- [x] Priority / Due date / Label sorts in the funnel menu; ^T ^D ^⇧D ^L shortcuts; activity entries for the new fields
+Done when: typing "pay rent tomorrow at 5pm" sets the date and strips that text from the title. ✔ (dates.spec.ts)
+- Left for later phases: Remind me (M5.2) and Repeat (M5.1) rows in the date picker; repeat phrases are parsed but not offered until M5.1. `#label` in the quick command comes with M4.3.
 ### M3.3 Task actions + multiselect `[ ]`
 Specs: spec/tasks.md (actions), spec/views.md (Multiselect)
 
@@ -180,3 +183,7 @@ Done when (M4): a full day of work is possible without the mouse.
 - Live-update an open details panel when its task moves to another list (the old page gets block deletes only, D-056)
 - Remember collapsed subtasks per user (M3.1 keeps it in component state)
 - Sublists inside a task's details (lists-and-blocks.md allows it; M3.1 task bodies refuse sublist blocks, D-056)
+- Accepting a date suggestion takes two undo steps (due date, then text); make it one (D-066)
+- Label colours in the label picker/chips beyond the dot; a colour picker inside the task's label popover (D-067)
+- A priority shortcut and a priority NL phrase ("!high") if Superlist has them (D-068)
+- Show the due time in the task's own zone when it differs from the viewer's (today the wall-clock time is shown as stored, D-063)

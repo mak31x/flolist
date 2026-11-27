@@ -98,6 +98,9 @@ describe("task sync events and sorts", () => {
           titleInline: textInline("Hi"),
           completedAt: null,
           completedBy: null,
+          due: { date: "2026-11-28", time: "17:00", tz: "Asia/Kolkata" },
+          priority: 2,
+          labelIds: [id(6)],
           createdBy: id(5),
           createdAt: now,
           updatedAt: now,
@@ -110,12 +113,15 @@ describe("task sync events and sorts", () => {
     );
   });
 
-  it("offers the task-field sorts that work in M3.1", () => {
+  it("offers the task-field sorts that work in M3.2", () => {
     expect(AVAILABLE_LIST_SORTS).toEqual([
       "manual",
       "creator",
       "alphabetical",
+      "priority",
       "created",
+      "due",
+      "label",
       "completed",
     ]);
   });

@@ -22,6 +22,7 @@ import {
   type BlockOp,
   type BlockPage,
   type BlockShape,
+  type UpsertBlockOp,
 } from "@flolist/shared";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -337,17 +338,24 @@ export const blockRoutes = new Hono<AppEnv>()
           return { containerType: target.type, containerId: target.id };
         }
 
-        /** Title and completion of a task block's task. */
+        /** Title, completion and the other fields of a task block's task. */
         async function updateTask(
           index: number,
           taskId: string,
           content: BlockContent | undefined,
-          completed: boolean | undefined,
+          fields: UpsertBlockOp["task"],
         ) {
           const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for("update");
           if (!task) throw new Error(`task ${taskId} missing`);
           const inline = content ? titleOf(index, content) : undefined;
-          if (await patchTask(tx, task, { inline, completed }, user.id, now)) {
+          const change = {
+            inline,
+            completed: fields?.completed,
+            due: fields?.due,
+            priority: fields?.priority,
+            labelIds: fields?.labelIds,
+          };
+          if (await patchTask(tx, task, change, user.id, now)) {
             touchedTasks.add(taskId);
           }
         }
@@ -467,6 +475,10 @@ export const blockRoutes = new Hono<AppEnv>()
                     titleOf(index, shape.content),
                     op.task?.completed ?? false,
                   );
+                  const { due, priority, labelIds } = op.task ?? {};
+                  if (due !== undefined || priority !== undefined || labelIds !== undefined) {
+                    await updateTask(index, taskId, undefined, { due, priority, labelIds });
+                  }
                 }
                 const [created] = await tx
                   .insert(blocks)
@@ -568,7 +580,7 @@ export const blockRoutes = new Hono<AppEnv>()
                   index,
                   taskId,
                   op.content || op.type ? shape.content : undefined,
-                  op.task?.completed,
+                  op.task,
                 );
               }
 

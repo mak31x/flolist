@@ -10,7 +10,7 @@
 | recurrence | RRULE + anchor (D-009) |
 | reminders | 0..n per user per task; the UI exposes one "Remind me" (Superlist parity) |
 | assignee | **single assignee** (Superlist parity) or none |
-| priority | none · low · medium · high [assumption: Superlist shows a "bars" icon with levels; confirm visually and adjust] |
+| priority | none · low · medium · high, shown as signal bars (High in the accent) [assumption: Superlist shows a "bars" icon with levels; confirm visually and adjust] (D-067) |
 | labels | 0..n workspace-scoped labels; rename/merge/delete in Settings → Labels |
 | body | block content (subtasks, text, images, attachments), like a small list |
 | messages | discussion thread at the bottom of the details panel |
@@ -29,10 +29,12 @@
 - Typing date phrases in a title shows a **suggestion popover** under the caret (e.g. "📅 Tomorrow 5:00 pm"). Return, a click or a tap accepts it: the phrase is **removed from the title** and the due date/time is set. Esc, or simply continuing to type, ignores it.
 - Supported: today, tomorrow, weekdays ("thursday"), "this/next <weekday|week|month>", "end of <week|month>", "January 5th", "Jan 2027", times ("at 5pm", "17:00"), and repeats ("daily", "every week", "every monday", "every 2 weeks", "monthly", "yearly", "every weekday").
 - Not supported (parity): complex rules such as "every second Wednesday of the month" (use the custom repeat UI instead).
-- Wrap chrono-node (plus our own recurrence-phrase rules) in `packages/shared/dates/parseNaturalDate.ts`, which both the web app (instant suggestions) and the API (email forwarding, Slack, public API) use. Cover it with fixture tests: input, reference "now", timezone and week start → expected date/time/rrule and the consumed text span. Honour the first-day-of-week setting for "next week".
+- Phrase meanings ("this week", "next friday", time-only phrases, ranges, false positives such as "sun" or "march on") are listed in D-065 [assumption]. Repeat phrases are parsed now but only offered once recurring tasks exist (M5.1).
+- Wrap chrono-node (plus our own recurrence-phrase rules) in `packages/shared/src/dates/parseNaturalDate.ts`, which both the web app (instant suggestions) and the API (email forwarding, Slack, public API) use. Cover it with fixture tests: input, reference "now", timezone and week start → expected date/time/rrule and the consumed text span. Honour the first-day-of-week setting for "next week".
 
 ## Due dates
-- Set via the chip or date picker (see ui-design.md §6) or with the shortcuts ^T (today), ^D (pick), ^⇧D (clear).
+- Set via the chip or date picker (see ui-design.md §6) or with the shortcuts ^T (today), ^D (pick), ^⇧D (clear). Off Apple platforms these use Alt instead of Ctrl, since Ctrl is Mod there [assumption] (D-068).
+- A due date without an explicit zone takes the setter's profile time zone; the stored wall-clock date/time is shown as is [assumption] (D-063).
 - Display: "Today", "Tomorrow", a weekday name within the next 6 days, otherwise "24 Nov" (with the year if it isn't the current year). Add the time if set ("Tomorrow 5:00 pm"). Overdue dates show in the accent colour.
 - A task with a due time and Google Calendar connected syncs as a 30-minute event; all-day otherwise (M9).
 
@@ -58,7 +60,7 @@
 - Completing a parent does **not** auto-complete its subtasks (Superlist parity) [assumption]. Deleting a parent sends its subtasks to Trash with it.
 
 ## Labels
-- Free-text labels, unique per workspace (case-insensitive), with a colour from the theme palette [assumption: Superlist shows grey label chips; colour is optional].
+- Free-text labels, unique per workspace (case-insensitive), with a colour from the theme palette [assumption: Superlist shows grey label chips; colour is optional]. Grey chips with an optional colour dot; names ≤ 50 characters, leading `#` dropped [assumption] (D-064).
 - Add through the chip, ^L, the editing-row tag icon, or `#label` in the quick command [assumption].
 - Integration-created tasks get system labels (Gmail, Slack, GitHub + the repo name + issue/PR) that users can rename.
 

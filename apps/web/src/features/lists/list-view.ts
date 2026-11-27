@@ -19,7 +19,9 @@ const textOf = (b: Block) => ("inline" in b.content ? inlineText(b.content.inlin
  * - Sorts reorder top-level rows; subtasks stay under their task `[assumption]`:
  *   Alphabetical by text (textless blocks last); Creator: the caller's blocks first, then
  *   others grouped by creator; Creation date: newest first; Completed: open tasks and other
- *   blocks in stored order, then completed tasks, most recently completed first
+ *   blocks in stored order, then completed tasks, most recently completed first; Priority:
+ *   High → Low, then the rest; Due date: earliest first (on one day, timed before all-day),
+ *   undated last; Label: by the first label's name, unlabeled last
  *   `[assumption: Superlist's exact orders unchecked]`.
  */
 export function viewBlocks(
@@ -27,6 +29,7 @@ export function viewBlocks(
   prefs: ListViewPrefs,
   depth: ReadonlyMap<string, number> = new Map(),
   me: string | null = null,
+  labelName: (id: string) => string | undefined = () => undefined,
 ): readonly Block[] {
   if (!prefs.tasksOnly && !prefs.hideCompleted && prefs.sort === "manual") return rows;
 
@@ -86,6 +89,37 @@ export function viewBlocks(
         return db.localeCompare(da) || byStored(a, b);
       });
       break;
+    case "priority":
+      order.sort(
+        (a, b) => (b.g.head.task?.priority ?? 0) - (a.g.head.task?.priority ?? 0) || byStored(a, b),
+      );
+      break;
+    case "due": {
+      const key = (g: Group) => {
+        const due = g.head.task?.due;
+        return due ? `${due.date} ${due.time ?? "99:99"}` : null;
+      };
+      order.sort((a, b) => {
+        const ka = key(a.g);
+        const kb = key(b.g);
+        if (ka === null || kb === null) return ka === kb ? byStored(a, b) : ka === null ? 1 : -1;
+        return ka.localeCompare(kb) || byStored(a, b);
+      });
+      break;
+    }
+    case "label": {
+      const key = (g: Group) => {
+        const first = g.head.task?.labelIds.map(labelName).find((n) => n !== undefined);
+        return first ?? null;
+      };
+      order.sort((a, b) => {
+        const ka = key(a.g);
+        const kb = key(b.g);
+        if (ka === null || kb === null) return ka === kb ? byStored(a, b) : ka === null ? 1 : -1;
+        return collator.compare(ka, kb) || byStored(a, b);
+      });
+      break;
+    }
     default:
       break;
   }

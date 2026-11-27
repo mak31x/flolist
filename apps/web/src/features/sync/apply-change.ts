@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { applyBlockChange, type BlockChangeEvent } from "../editor/store.ts";
 import { listKey, listPrefsKey, listsKey, sidebarKey } from "../lists/api.ts";
 import { activityKey } from "../tasks/api.ts";
+import { applyLabelChange } from "../properties/labels-api.ts";
 import {
   removeEntry,
   removeList,
@@ -31,6 +32,9 @@ const isNewer = (current: { version: number } | undefined, version: number) =>
  */
 export function applyChange(qc: QueryClient, event: ChangeEvent): void {
   switch (event.entity) {
+    case "label":
+      applyLabelChange(qc, event);
+      return;
     case "task":
       // Rows show tasks through their blocks (block events); the activity log refetches.
       void qc.invalidateQueries({ queryKey: activityKey(event.id) });

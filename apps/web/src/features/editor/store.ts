@@ -8,6 +8,8 @@ import {
   type BlockContainer,
   type BlockOp,
   type ChangeEvent,
+  type Priority,
+  type TaskDue,
 } from "@flolist/shared";
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiRequestError, type ApiOptions } from "../../lib/api.ts";
@@ -22,7 +24,17 @@ import { removeBlock, sortBlocks, upsertBlock } from "./cache.ts";
  */
 export type BlockFields = Partial<
   Pick<Block, "type" | "position" | "indent" | "content" | "fileId" | "sublistId" | "taskId">
-> & { completed?: boolean; container?: BlockContainer };
+> & {
+  completed?: boolean;
+  container?: BlockContainer;
+  /** Task fields (M3.2): `due: null` clears the date; `labelIds` replaces the set. */
+  due?: TaskDue | null;
+  priority?: Priority;
+  labelIds?: string[];
+};
+
+/** Task fields that live on `block.task` besides completion. */
+const TASK_FIELD_KEYS = ["due", "priority", "labelIds"] as const;
 
 /** One local change. Moves are upserts of `position`/`indent`. */
 export type LocalOp =
@@ -59,6 +71,7 @@ const UNDO_KEYS = [
   "taskId",
   "completed",
   "container",
+  ...TASK_FIELD_KEYS,
 ] as const;
 /** `keepalive` requests are capped at 64 KB by browsers. */
 const KEEPALIVE_LIMIT = 60_000;
@@ -82,6 +95,7 @@ const fullFields = (b: Block): BlockFields => ({
 function fieldOf(b: Block, key: (typeof UNDO_KEYS)[number]): unknown {
   if (key === "container") return containerOf(b);
   if (key === "completed") return b.task ? b.task.completedAt !== null : undefined;
+  if (key === "due" || key === "priority" || key === "labelIds") return b.task?.[key];
   if (key === "taskId" || key === "fileId") return b[key] ?? undefined;
   return b[key];
 }
@@ -104,7 +118,10 @@ function overlay(
   const taskId = isTask ? (fields.taskId ?? base.taskId) : null;
   if (isTask && !taskId) throw new Error("A task block needs a task id");
   const completed = fields.completed ?? (base.task ? base.task.completedAt !== null : false);
-  const unchanged = base.task && fields.completed === undefined ? base.task : null;
+  const completion =
+    base.task && fields.completed === undefined
+      ? { completedAt: base.task.completedAt, completedBy: base.task.completedBy }
+      : { completedAt: completed ? now : null, completedBy: completed ? userId : null };
   return {
     ...base,
     ...result.shape,
@@ -114,20 +131,25 @@ function overlay(
     fileId: fields.fileId ?? base.fileId,
     taskId,
     task: isTask
-      ? (unchanged ?? {
-          completedAt: completed ? now : null,
-          completedBy: completed ? userId : null,
-        })
+      ? {
+          ...completion,
+          due: fields.due !== undefined ? fields.due : (base.task?.due ?? null),
+          priority: fields.priority ?? base.task?.priority ?? 0,
+          labelIds: fields.labelIds ?? base.task?.labelIds ?? [],
+        }
       : null,
   };
 }
 
 /** A queued upsert as the batch API takes it (`sublistId` → `sublist`, task fields → `task`). */
 function upsertOp(id: string, fields: BlockFields): BlockOp {
-  const { sublistId, fileId, taskId, completed, ...rest } = fields;
+  const { sublistId, fileId, taskId, completed, due, priority, labelIds, ...rest } = fields;
   const task = {
     ...(taskId ? { id: taskId } : {}),
     ...(completed !== undefined ? { completed } : {}),
+    ...(due !== undefined ? { due } : {}),
+    ...(priority !== undefined ? { priority } : {}),
+    ...(labelIds !== undefined ? { labelIds } : {}),
   };
   return {
     op: "upsert",

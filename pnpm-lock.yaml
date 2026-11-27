@@ -449,6 +449,9 @@ importers:
 
   packages/shared:
     dependencies:
+      chrono-node:
+        specifier: 2.10.3
+        version: 2.10.3
       fractional-indexing:
         specifier: 4.0.0
         version: 4.0.0
@@ -2957,6 +2960,10 @@ packages:
 
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
+
+  chrono-node@2.10.3:
+    resolution: {integrity: sha512-MOfrzXgSMZTH4SZ5gyRKQCVwiCrCKY+uYkSJiWoRLXS88DA6WGJm8UjgS+VVEuUQeew/UUXaxrO+SeDn/WCisg==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
@@ -6889,6 +6896,8 @@ snapshots:
   chai@6.3.0: {}
 
   chownr@1.1.4: {}
+
+  chrono-node@2.10.3: {}
 
   cliui@8.0.1:
     dependencies:

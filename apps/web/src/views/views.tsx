@@ -14,6 +14,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useThemeStore } from "../shell/theme-store.ts";
 import { EmptyTasks, Page } from "./Page.tsx";
+import { LabelsTab } from "../features/properties/LabelsTab.tsx";
 import { settingsTabs } from "./settings-tabs.ts";
 import { SettingsCard } from "./SettingsCard.tsx";
 import { ProfileTab } from "../features/profile/ProfileTab.tsx";
@@ -185,6 +186,8 @@ export function SettingsView() {
           <ProfileTab />
         ) : tab === "features" ? (
           <AppearanceCard />
+        ) : tab === "labels" ? (
+          <LabelsTab />
         ) : (
           <SettingsPlaceholder />
         )}
