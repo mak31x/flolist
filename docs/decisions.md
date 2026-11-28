@@ -497,6 +497,38 @@ Decision (`[assumption]` where Superlist is unchecked):
 Context: D-067 says empty task fields show as icons only while editing, but the row meta line stacked `inline-flex` and `hidden`, and `inline-flex` won in the stylesheet, so dated tasks always showed empty priority/label icons.
 Decision: the display class is chosen, not stacked (`shown(empty)`); behaviour now matches D-067.
 
+## D-075 — Inbox storage, tasks in no list and their access (M4.1)  (2026-11-28 · Accepted)
+Decision:
+- Migration 0008: `inbox_items(user_id, task_id, position collate "C", reason, added_at, updated_at)` PK both, reasons `assigned|manual|quick|integration` (shared `INBOX_REASONS`, a type-level check keeps them equal); `today_order(user_id, date, task_id, position, updated_at)` PK all three. Change events `inboxItem` / `todayOrder` go to `user:<id>` with `updated_at` in ms as version.
+- A task in no list (Inbox-only) has `list_id`/`root_list_id` null and lives in the creator's Personal workspace (until the workspace filter, M7.1). New matrix actions `task.view`/`task.edit` (role `creator`, resolved through the top-level task; M7.3 adds the assignee) and `workspace.createTask` (personal owner, team owner and members). For a task in a list `authorize()` maps task actions to `list.view`/`list.edit` on its home list.
+- **Completed tasks stay in the Inbox** (the row survives), so reopening brings them back; the view hides them by default (Hide completed) `[assumption]`. **A task in no list can't be removed from the Inbox** (409): it leaves by moving to a list or by being deleted (else it would be reachable from nowhere) `[assumption]`. New Inbox items go to the top `[assumption]`.
+- Routes: `GET /inbox` (items, their tasks plus live subtasks, subtask positions), `POST /inbox/tasks` (client id; activity `created` + field changes), `PUT /inbox/items/:taskId` (add or reorder, `task.view`), `DELETE /inbox/items/:taskId`. `DELETE /tasks/:id` / `POST /tasks/:id/restore` trash and restore a top-level task in no list (trash root = the task).
+Consequences: until sharing/assigning every inbox item is the holder's own or visible task; `GET /inbox` still re-checks access per item and skips the ones it can't see.
+
+## D-076 — Task pages: bodies of tasks in no list (M4.1)  (2026-11-28 · Accepted · extends D-056)
+Decision: such a task's body (and its subtasks' bodies) are ordinary `blocks` with `container_type='task'` and `root_list_id` null (`blocks_root_list_check` allows null only there; the block DTO's `rootListId` is nullable). `GET /tasks/:id/page` returns the top-level task's page (a subtask answers its top task's), `POST /tasks/:id/blocks/batch` edits it with the same code as a list page: the batch handler became `applyBlockBatch(scope, page, ops)` (`blocks/batch.ts`) over a `BatchPage` (list id or null, root, workspace, default container, channels). Sublists are refused on task pages. Client: `BlockStore`/`useBlockStore`/`blocksQuery`/`BlockEditor` take `pageKind: "task"` (the page key is the top task id); the slash menu hides Sublist in any task body.
+Alternatives: a hidden per-user "Inbox" list holding these tasks (less code, but contradicts data-model.md's `root_list_id NULL = Inbox-only` and leaks a fake list into every list query).
+
+## D-077 — Today, the views and their rows (M4.1)  (2026-11-28 · Accepted)
+Decision (`[assumption]` where Superlist is unchecked):
+- `GET /today?date=` returns open tasks due on or before the day that the caller can access (live lists whose root they created, tasks in no list under their own top task), subtasks included as their own rows, plus tasks completed that day in the profile time zone and the day's manual order. The client re-derives Overdue/Today/Completed from the cache so completing or rescheduling moves rows at once. "Reschedule all" (`POST /today/reschedule`, all or nothing) keeps each task's time and zone. New tasks in Today are due that day and go to the top of the Inbox; manual order applies when the sort is Manual (per-day `today_order`, drag in Today is Backlog). Viewing another day uses `?date=`; tasks due earlier than it show as Overdue.
+- Rows render `Task` DTOs shaped as task blocks (`taskAsBlock`), reusing the list row's marker, meta line, pickers, sorts (`viewBlocks`) and the inline title editor (saved after a 500 ms pause / on blur through `PATCH /tasks/:id`, optimistic over the view caches). Today rows show their list's title. Details open at `/inbox/tasks/:id` and `/today/tasks/:id` (`PanelTask`): tasks in a list use the list's details, tasks in no list a details view over their task page.
+- Filter/sort settings for Inbox (Manual, Hide completed on) and Today (Due date) are kept per device in localStorage (`flolist.viewPrefs`); per-user sync is Backlog.
+- Shortcuts in Inbox/Today: ^N on Apple web (⌘N is the browser's; M10 maps ⌘N), Alt+N elsewhere, C outside editable fields (`event.code`). Quick create → New task creates at the top of the Inbox and opens it.
+- `useOptimistic` moved to `lib/optimistic.ts` and gained `rollback`; new Inbox tasks are seeded into the cache before `mutate` so the row exists for the next keystroke; edits wait for a pending create of the same task.
+
+## D-078 — Moving tasks between a list and no list; Inbox actions (M4.1)  (2026-11-28 · Accepted · extends D-071/D-072)
+Decision:
+- `POST /tasks/:id/move {listId}`: `null` = **Remove from list** (⌘⇧R; keyboard-shortcuts.md names it, not Remove from Inbox, which has no shortcut): the task and subtree leave the list for the top of the actor's Inbox; a subtask becomes top-level. **Its block is deleted outright, not trashed** — it was only the task's place in the list and `blocks.task_id` is unique, so a trashed copy would block the task from ever getting a block again; the task keeps everything. A list id moves a top-level task in no list onto that list's end (same workspace) and out of the actor's Inbox. Activity `moved` with `null` for the Inbox side. Moves between lists keep using move-to.
+- The action registry gains Add to Inbox (⌘⇧I) / Remove from Inbox (only on list pages) / Remove from list, in row menus, the details ⋮ and the list selection bar; actions flush the editor store first. Inbox/Today rows have their own registry over `Task`s (`view-actions.tsx`) with right-click menus, Mod/Shift-click and long-press selection (`useSelectGestures`) and a bar (move, Inbox, Remove from list, complete, delete). Dropping Inbox rows on a sidebar list moves them; dropping list tasks on the sidebar Inbox (`data-drop-inbox`) adds them.
+
+## D-079 — Live block deletes apply up to their version (M4.1)  (2026-11-28 · Accepted · amends D-054's events)
+Context: move-to sends block deletes to the source channel and the client drops deleted ids from every cached page — including the target page it had just filled from the move's answer, when the delete arrived after it.
+Decision: move-to's source deletes carry the source copy's version (before the move bumped it); a client removes a cached block only when its cached version is ≤ the event's. Other deletes carry the deleted row's version, as before.
+
+## D-080 — Task events reach their audience (M4.1)  (2026-11-28 · Accepted · extends D-042)
+Decision: `task` events, and block events of task pages, go to `list:<root>` (if any) plus `user:<id>` of everyone who can see the task — the root list's creator, or the top task's creator for tasks in no list, and every Inbox holder of the task or its top task (`tasks/audience.ts`). The Inbox, Today and task queries patch from them or refetch when membership may change (new subtask, delete). No new libraries in M4.1.
+
 ---
 
 ## Open questions (resolve, then turn into decisions)

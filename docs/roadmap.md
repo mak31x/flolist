@@ -4,13 +4,13 @@ Each phase is one Claude Code chat. Start it with `/start-phase <id>` and end it
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Handoff (rewritten at the end of every phase; ≤15 lines)
-- **Last phase:** M3.3 Task actions + multiselect (done; branch `phase/M3.3-task-actions-multiselect`). D-071–D-074.
-- **State:** no migration. `POST /lists/:id/blocks/move-to` now takes any block of the list *page* (subtask blocks too: they become top-level tasks of the target), keeps page order and logs `moved` (`{id,title}` old/new) per moved task. Duplicate is client-side: one store batch copies the task, body and subtasks (no new route).
-- **Web:** `features/tasks/` — `actions.tsx` (the registry + `TaskActionHost`), `task-ops.ts` (pure ops/copy text, tested), `TaskMenus.tsx` (row context menu, ⋮ items), `SelectionBar.tsx`, `MoveToListDialog.tsx` + `move-store.ts` (mounted in AppShell), `task-actions-context.ts`. `editor/select-gestures.ts` (Mod/Shift-click, long-press). `KeyContext.selection` is a range or a set (`ids`; `toggle`, `setIds`); `selectedRows()` resolves it. Platform: `appOrigin`, `writeClipboard`.
-- **Run / verify:** `pnpm infra:up`, `pnpm dev`; right-click a task; ⌘/Ctrl-click and Shift-click rows → bar; Esc then ⌘D / ⌘⇧D / ⌘⌫; ⋮ in details. `pnpm check`; `pnpm test:e2e` (task-actions.spec.ts).
-- **Gotchas:** stop your own dev servers before `pnpm test:e2e`, or it reuses an API with the 10/min sign-up limit. Radix menus restore focus on close: the row menu prevents it so Duplicate/pickers can place focus; picker actions open in a `setTimeout`. Focus moving into the bar or anything with `data-keep-selection` keeps the selection. macOS turns Ctrl-click into a context-menu click; select-clicks suppress it. e2e lists must wait for their titles to save before moves read them.
-- **Next:** M4.1 Inbox + Today (also brings Add to / Remove from Inbox and ⌘⇧I / ⌘⇧R into the actions registry).
----
+- **Last phase:** M4.1 Inbox + Today (done; branch `phase/M4.1-inbox-today`). D-075–D-080.
+- **State:** migration 0008 (`inbox_items`, `today_order`, `blocks.root_list_id` nullable for task bodies only). Tasks in no list resolve through their top-level task's creator (`task.view/edit`, `workspace.createTask`). Task and body-block events also go to `user:<id>` of everyone who sees the task (`tasks/audience.ts`).
+- **API:** `GET /inbox`, `POST /inbox/tasks`, `PUT|DELETE /inbox/items/:taskId`; `GET /today?date=`, `PUT /today/order`, `POST /today/reschedule`; `GET /tasks/:id/page` + `POST /tasks/:id/blocks/batch` (Inbox-only task bodies; same `applyBlockBatch` as lists, `blocks/batch.ts`); `DELETE /tasks/:id`, `POST /tasks/:id/restore`, `POST /tasks/:id/move {listId|null}` (Remove from list / into a list).
+- **Web:** `features/task-views/` (InboxView, TodayView, TaskViewRow over `Task` DTOs shaped as blocks, TaskPanel, mutations, view-actions + ViewActionUi, selection, inbox-actions, view-prefs). `shell/panel-task.ts` routes details for `/inbox/tasks/:id` and `/today/tasks/:id`. BlockStore/BlockEditor take `pageKind: "task"`. `editor/drop-targets.ts`; sidebar Inbox has `data-drop-inbox`.
+- **Run / verify:** `pnpm infra:up`, `pnpm dev`; Inbox New task / Enter / details body; Today overdue → Reschedule all, Completed tab, ‹ ›; right-click → Add to Inbox / Remove from list / Move to list; Quick create → New task; C and ^N (Alt+N). `pnpm check`; `pnpm test:e2e` (inbox-today.spec.ts).
+- **Gotchas:** e2e flakes under full local parallelism on a busy machine; use `--workers=2` to confirm. Hooks keyed on the shell's `PanelTask` object must use its fields (a new `close` each render looped navigation). Live block deletes apply only up to their version. New Inbox rows are seeded into the cache before `mutate` so typing lands; New task waits for the view to load. Inbox actions flush the editor store first.
+- **Next:** M4.2 Week view (its columns' New task rows reuse `useCreateInboxTask` with a due date; Today's drag-reorder is Backlog).
 
 ## M0 — Foundation and walking skeleton
 ### M0.1 Monorepo scaffold `[x]`
@@ -90,7 +90,14 @@ Specs: spec/tasks.md (actions), spec/views.md (Multiselect)
 - Fixed in passing: M3.2's meta line always showed the empty priority/label icons on dated tasks (`inline-flex` beat `hidden`).
 
 ## M4 — Views, search, keyboard
-### M4.1 Inbox + Today `[ ]`  Specs: spec/views.md (Inbox, Today)
+### M4.1 Inbox + Today `[x]`
+Specs: spec/views.md (Inbox, Today)
+- [x] Inbox: `inbox_items`, tasks in no list (their own body page), New task row, nested subtasks, Hide completed + sorts, drag to reorder, details panel
+- [x] Today: open tasks due that day or earlier from lists and the Inbox, Overdue group + Reschedule all, Open | Completed, ‹ › and calendar days, per-day manual order (stored), new tasks due that day into the Inbox
+- [x] Add to / Remove from Inbox, Remove from list (⌘⇧R), Move to list for tasks in no list; row menus and multiselect in both views; drag Inbox rows onto sidebar lists and list tasks onto the sidebar Inbox
+- [x] New task enabled: Quick create → Inbox, ^N / Alt+N and C in Inbox and Today
+- Deferred: drag to reorder Today (order is stored and Enter places new tasks; no drag yet), due/label pickers in the view selection bar, date suggestions in view rows (Backlog). Week columns' New task rows are M4.2; All tasks' pill and ⌘K are M4.3.
+- Fixed in passing: a move's live block deletes could wipe the moved rows from the target list's cache (deletes now carry the source copy's version, D-079); slash menu offered Sublist inside task bodies (server refused it).
 ### M4.2 Week view `[ ]`  Specs: spec/views.md (Week)
 ### M4.3 All tasks, search, quick command, shortcuts `[ ]`  Specs: spec/views.md (All tasks, Search, Quick command), spec/keyboard-shortcuts.md
 Done when (M4): a full day of work is possible without the mouse.
@@ -194,3 +201,9 @@ Done when (M4): a full day of work is possible without the mouse.
 - Label colours in the label picker/chips beyond the dot; a colour picker inside the task's label popover (D-067)
 - A priority shortcut and a priority NL phrase ("!high") if Superlist has them (D-068)
 - Show the due time in the task's own zone when it differs from the viewer's (today the wall-clock time is shown as stored, D-063)
+- Drag to reorder rows in Today (per-day order is stored and used, M4.1 has no drag there, D-077)
+- Due date / label pickers in the Inbox/Today selection bar (M4.1 bar: move, Inbox, Remove from list, complete, delete)
+- Date suggestions (natural-language phrases) while typing a title in an Inbox/Today row (D-066 runs in list rows and the details panel only)
+- Sync Inbox/Today filter and sort settings per user instead of per device (D-077)
+- E2e: several older specs (lists two-window sync, task-actions multiselect, tasks) fail under full local parallelism on a loaded machine; all pass with `--workers=2` and alone (seen in M4.1)
+- Let a subtask of an Inbox-only task move to a list on its own (M4.1 moves top-level tasks only, D-078)

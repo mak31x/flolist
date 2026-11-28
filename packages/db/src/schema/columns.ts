@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, timestamp, uuid } from "drizzle-orm/pg-core";
+import { customType, integer, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * UUIDv7 primary key. Clients normally send the id (D-006); Postgres 18+'s native
@@ -22,3 +22,11 @@ export const updatedAt = () =>
 
 /** Bumped on every update; used for field-level last-write-wins (D-006). */
 export const version = () => integer("version").notNull().default(1);
+
+/**
+ * A fractional-index key stored with the "C" collation, so `order by position` and its index
+ * sort byte-wise (D-041) without a `collate` in every query.
+ */
+export const positionText = customType<{ data: string }>({
+  dataType: () => `text collate "C"`,
+});

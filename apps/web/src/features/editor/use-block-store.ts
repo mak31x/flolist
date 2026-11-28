@@ -1,3 +1,4 @@
+import type { BlockContainer } from "@flolist/shared";
 import { toast } from "@flolist/ui";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -34,7 +35,13 @@ interface Shared {
  */
 const shared = new Map<string, Shared>();
 
-function storeFor(qc: QueryClient, listId: string, rootListId: string, userId: string | null) {
+function storeFor(
+  qc: QueryClient,
+  listId: string,
+  rootListId: string | null,
+  userId: string | null,
+  pageKind: BlockContainer["type"],
+) {
   let entry = shared.get(listId);
   if (!entry) {
     entry = {
@@ -42,6 +49,7 @@ function storeFor(qc: QueryClient, listId: string, rootListId: string, userId: s
         qc,
         listId,
         rootListId,
+        pageKind,
         userId,
         ready: () => listCreated(qc, listId),
         onError: () => {
@@ -93,13 +101,18 @@ function acquire(entry: Shared, listId: string): () => void {
 }
 
 /**
- * The block store for one open list page. Pending changes are flushed when the last editor
+ * The block store for one open page (a list, or the body page of a task in no list). Pending changes are flushed when the last editor
  * using it closes, when the tab is hidden and when the page goes away (`keepalive`, so the
  * request survives).
  */
-export function useBlockStore(listId: string, rootListId: string, userId: string | null) {
+export function useBlockStore(
+  listId: string,
+  rootListId: string | null,
+  userId: string | null,
+  pageKind: BlockContainer["type"] = "list",
+) {
   const qc = useQueryClient();
-  const [entry] = useState(() => storeFor(qc, listId, rootListId, userId));
+  const [entry] = useState(() => storeFor(qc, listId, rootListId, userId, pageKind));
 
   useEffect(() => acquire(entry, listId), [entry, listId]);
 

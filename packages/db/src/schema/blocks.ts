@@ -2,7 +2,6 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   check,
-  customType,
   index,
   jsonb,
   pgTable,
@@ -12,7 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
-import { createdAt, id, updatedAt, version } from "./columns.ts";
+import { createdAt, id, positionText, updatedAt, version } from "./columns.ts";
 import { files } from "./files.ts";
 import { lists } from "./lists.ts";
 import { tasks } from "./tasks.ts";
@@ -38,16 +37,9 @@ export const blockContainerTypes = ["list", "task"] as const;
 export const blockMaxIndent = 4;
 
 /**
- * A fractional-index key stored with the "C" collation, so `order by position` and the
- * container index both sort byte-wise (D-041) without a `collate` in every query.
- */
-const positionText = customType<{ data: string }>({
-  dataType: () => `text collate "C"`,
-});
-
-/**
  * One block of a list or task body (D-007, data-model.md → Blocks). `root_list_id` is the root
- * list whose access and `list:<rootId>` channel apply. Image/attachment blocks point at a file,
+ * list whose access and `list:<rootId>` channel apply; it is null only in the bodies of tasks
+ * that live in no list (Inbox-only, M4.1), whose access is the task's. Image/attachment blocks point at a file,
  * sublist blocks at their child list (one block per list), task blocks at their task.
  * Soft-deleted rows keep `trash_root_id`.
  */
@@ -57,9 +49,7 @@ export const blocks = pgTable(
     id: id(),
     containerType: text("container_type", { enum: blockContainerTypes }).notNull(),
     containerId: uuid("container_id").notNull(),
-    rootListId: uuid("root_list_id")
-      .notNull()
-      .references(() => lists.id, { onDelete: "cascade" }),
+    rootListId: uuid("root_list_id").references(() => lists.id, { onDelete: "cascade" }),
     position: positionText("position").notNull(),
     type: text("type", { enum: blockTypes }).notNull(),
     indent: smallint("indent").notNull().default(0),
@@ -92,6 +82,10 @@ export const blocks = pgTable(
     index("blocks_root_list_id_idx").on(t.rootListId),
     index("blocks_trash_root_id_idx").on(t.trashRootId),
     index("blocks_file_id_idx").on(t.fileId),
+    check(
+      "blocks_root_list_check",
+      sql`${t.rootListId} is not null or ${t.containerType} = 'task'`,
+    ),
     check(
       "blocks_reference_check",
       sql`(${t.fileId} is null or ${t.type} in ('image', 'attachment')) and ((${t.sublistId} is not null) = (${t.type} = 'sublist')) and ((${t.taskId} is not null) = (${t.type} = 'task'))`,

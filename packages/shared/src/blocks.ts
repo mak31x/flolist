@@ -192,7 +192,8 @@ export const blockSchema = z.object({
   id: z.uuid(),
   containerType: containerTypeSchema,
   containerId: z.uuid(),
-  rootListId: z.uuid(),
+  /** Null in the body of a task that lives in no list (Inbox-only, M4.1). */
+  rootListId: z.uuid().nullable(),
   position: z.string(),
   type: blockTypeSchema,
   indent: z.number().int().min(0).max(MAX_INDENT),

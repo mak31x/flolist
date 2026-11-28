@@ -7,13 +7,13 @@ import {
   seconds,
   Dialog,
 } from "@flolist/ui";
-import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { PanelRightClose, Settings2 } from "lucide-react";
-import { TaskDetails } from "../features/tasks/TaskDetails.tsx";
+import { TaskPanel } from "../features/task-views/TaskPanel.tsx";
 import { t } from "../i18n/index.ts";
 import type { CoverId } from "./covers.ts";
 import { useMediaQuery } from "./use-media-query.ts";
+import { usePanelTaskNav, type PanelTask } from "./panel-task.ts";
 import { useShell } from "./ui-store.ts";
 
 /** What a route shows on the right: a fixed cover, the open list's own cover, or nothing. */
@@ -29,7 +29,7 @@ export interface PanelCover {
 type RightPanelProps = {
   cover: PanelCover | null;
   /** When set, the panel shows task details instead of the cover. */
-  task: { listId: string; taskId: string } | null;
+  task: PanelTask | null;
 };
 
 const transition = { duration: seconds(duration.base), ease: easing.out };
@@ -61,7 +61,7 @@ export function RightPanel({ cover, task }: RightPanelProps) {
             exit={{ opacity: 0 }}
             transition={transition}
           >
-            <TaskDetails task={task} />
+            <TaskPanel task={task} />
           </motion.div>
         ) : cover ? (
           <motion.div
@@ -98,17 +98,17 @@ export function RightPanel({ cover, task }: RightPanelProps) {
   );
 }
 
-function DetailsSheet({ task }: { task: { listId: string; taskId: string } }) {
-  const navigate = useNavigate();
+function DetailsSheet({ task }: { task: PanelTask }) {
+  const { close } = usePanelTaskNav(task);
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) void navigate({ to: "/lists/$listId", params: { listId: task.listId } });
+        if (!open) close();
       }}
     >
       <SheetContent side="right" title={t("tasks.details.label")}>
-        <TaskDetails task={task} />
+        <TaskPanel task={task} />
       </SheetContent>
     </Dialog>
   );

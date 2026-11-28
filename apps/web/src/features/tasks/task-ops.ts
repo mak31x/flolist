@@ -164,8 +164,8 @@ export function toPlainText(all: readonly Block[], selected: readonly Block[]): 
 }
 
 /** Copy link: one URL per selected task (its details page), one per line. */
-export function toLinks(origin: string, listId: string, selected: readonly Block[]): string {
-  return selected
-    .flatMap((b) => (b.taskId ? [`${origin}/lists/${listId}/tasks/${b.taskId}`] : []))
-    .join("\n");
+export function toLinks(origin: string, listId: string | null, selected: readonly Block[]): string {
+  // Tasks in no list (an Inbox-only task's subtasks) open from the Inbox.
+  const base = listId ? `${origin}/lists/${listId}` : `${origin}/inbox`;
+  return selected.flatMap((b) => (b.taskId ? [`${base}/tasks/${b.taskId}`] : [])).join("\n");
 }

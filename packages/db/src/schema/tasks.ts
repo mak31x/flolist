@@ -15,7 +15,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
-import { createdAt, id, updatedAt, version } from "./columns.ts";
+import { createdAt, id, positionText, updatedAt, version } from "./columns.ts";
 import { lists } from "./lists.ts";
 import { workspaces } from "./workspaces.ts";
 
@@ -39,7 +39,7 @@ export const tasks = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    /** Null for Inbox-only tasks (M4.1). */
+    /** Null for Inbox-only tasks (M4.1): they live in no list and are reached through `inbox_items`. */
     rootListId: uuid("root_list_id").references(() => lists.id, { onDelete: "cascade" }),
     listId: uuid("list_id").references(() => lists.id, { onDelete: "cascade" }),
     parentTaskId: uuid("parent_task_id").references((): AnyPgColumn => tasks.id, {
@@ -140,5 +140,63 @@ export const activityEvents = pgTable(
   (t) => [
     index("activity_events_entity_idx").on(t.entityType, t.entityId, t.createdAt),
     index("activity_events_workspace_id_idx").on(t.workspaceId),
+  ],
+);
+
+/** Why a task is in someone's Inbox (views.md → Inbox); `packages/shared` keeps the same list. */
+export const inboxReasons = ["assigned", "manual", "quick", "integration"] as const;
+
+/**
+ * A task in a user's Inbox (views.md → Inbox, data-model.md). One row per user and task; it goes
+ * when the task is completed, removed from the Inbox or moved onto a list. `position` is the
+ * user's manual Inbox order (D-041).
+ */
+export const inboxItems = pgTable(
+  "inbox_items",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    position: positionText("position").notNull(),
+    reason: text("reason", { enum: inboxReasons }).notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Its change events use this in ms as their version (like `list_view_prefs`, D-055). */
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.taskId] }),
+    index("inbox_items_user_position_idx").on(t.userId, t.position),
+    index("inbox_items_task_id_idx").on(t.taskId),
+    check(
+      "inbox_items_reason_check",
+      sql.raw(`"reason" in (${inboxReasons.map((r) => `'${r}'`).join(", ")})`),
+    ),
+  ],
+);
+
+/**
+ * A user's manual order of a task in Today for one calendar day (views.md → Today
+ * `[assumption]`). Tasks without a row follow the view's sort after the ordered ones.
+ */
+export const todayOrder = pgTable(
+  "today_order",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    date: date("date", { mode: "string" }).notNull(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    position: positionText("position").notNull(),
+    /** Its change events use this in ms as their version. */
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.date, t.taskId] }),
+    index("today_order_task_id_idx").on(t.taskId),
   ],
 );

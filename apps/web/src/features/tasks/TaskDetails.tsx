@@ -35,12 +35,19 @@ import { ListIcon } from "../lists/ListIcon.tsx";
 import { TaskPropertyChips } from "../properties/TaskProperties.tsx";
 import { usePicker } from "../properties/picker-store.ts";
 import type { TaskActionHost } from "./actions.tsx";
+import { useInboxActions } from "../task-views/inbox-actions.ts";
 import { ActivityLog } from "./ActivityLog.tsx";
 import { TaskMenuItems } from "./TaskMenus.tsx";
 
 export interface OpenTask {
   listId: string;
   taskId: string;
+}
+
+/** Where the panel goes on close, and how it opens another task (`usePanelTaskNav`). */
+export interface DetailsNav {
+  close: () => void;
+  open: (taskId: string, listId?: string | null) => void;
 }
 
 const titleEditorId = (blockId: string) => `details-title-${blockId}`;
@@ -52,14 +59,11 @@ const titleEditorId = (blockId: string) => `details-title-${blockId}`;
  * labels chips sit next to the list chip; the assignee chip and the message composer come with
  * M7.3. The ⋮ menu holds the task actions (M3.3).
  */
-export function TaskDetails({ task }: { task: OpenTask }) {
-  const navigate = useNavigate();
+export function TaskDetails({ task, nav }: { task: OpenTask; nav: DetailsNav }) {
   const { data: list } = useQuery(listQuery(task.listId));
   const { data: blocks } = useQuery(blocksQuery(task.listId));
   const block = blocks?.find((b) => b.taskId === task.taskId);
-  const close = useCallback(() => {
-    void navigate({ to: "/lists/$listId", params: { listId: task.listId } });
-  }, [navigate, task.listId]);
+  const { close } = nav;
 
   // Deleted here or elsewhere (or never in this list): back to the list.
   const gone = blocks !== undefined && !block;
@@ -76,7 +80,7 @@ export function TaskDetails({ task }: { task: OpenTask }) {
       }}
     >
       {list && block ? (
-        <Details key={block.id} block={block} list={list} close={close} />
+        <Details key={block.id} block={block} list={list} nav={nav} />
       ) : (
         <div className="p-4">
           <IconButton
@@ -95,7 +99,7 @@ export function TaskDetails({ task }: { task: OpenTask }) {
 function Details({
   block,
   list,
-  close,
+  nav,
 }: {
   block: Block;
   list: {
@@ -105,9 +109,10 @@ function Details({
     title: string;
     emoji: string | null;
   };
-  close: () => void;
+  nav: DetailsNav;
 }) {
   const navigate = useNavigate();
+  const { close } = nav;
   const me = useMe();
   const store = useBlockStore(list.id, list.rootListId, me.id);
   const [commands] = useState(() => new EditorCommands(store));
@@ -116,8 +121,10 @@ function Details({
   const parent = blocks ? parentBlockOf(blocks, block) : undefined;
   const inline = "inline" in block.content ? block.content.inline : [];
   const qc = useQueryClient();
+  const inbox = useInboxActions();
   const host = useMemo<TaskActionHost>(
     () => ({
+      inbox,
       listId: list.id,
       workspaceId: list.workspaceId,
       qc,
@@ -130,18 +137,14 @@ function Details({
       // Deleted or moved away: the panel closes (a moved task lives on in its new list).
       onGone: close,
     }),
-    [list.id, list.workspaceId, qc, commands, store, me.soundsEnabled, close],
+    [inbox, list.id, list.workspaceId, qc, commands, store, me.soundsEnabled, close],
   );
 
   const openTask = useCallback(
     (b: Block) => {
-      if (!b.taskId) return;
-      void navigate({
-        to: "/lists/$listId/tasks/$taskId",
-        params: { listId: list.id, taskId: b.taskId },
-      });
+      if (b.taskId) nav.open(b.taskId, list.id);
     },
-    [navigate, list.id],
+    [nav, list.id],
   );
 
   const suggest = useTitleSuggestions();

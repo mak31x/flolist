@@ -46,6 +46,8 @@ export function Sidebar({ onNavigate, inDrawer = false }: SidebarProps) {
             <Link
               to={to}
               onClick={onNavigate}
+              // Drop a task row here to add it to the Inbox (views.md → Inbox).
+              {...(to === "/inbox" ? { "data-drop-inbox": "" } : {})}
               className={cn(
                 "group relative flex h-8 items-center gap-2.5 rounded-lg px-2 text-body font-medium text-text",
                 "transition-colors duration-(--motion-fast) hover:bg-surface-hover",

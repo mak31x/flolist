@@ -9,7 +9,6 @@ import {
 } from "@flolist/db";
 import {
   ACTIVITY_MERGE_MINUTES,
-  channel,
   type ActivityAction,
   taskTitleText,
   type InlineNode,
@@ -21,6 +20,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { notFound } from "../lib/errors.ts";
 import { blockDtos, type BlockRow } from "../blocks/dto.ts";
 import type { MutationScope } from "../sync/mutation.ts";
+import { blockChannels, taskChannels } from "./audience.ts";
 
 export type TaskRow = typeof tasks.$inferSelect;
 
@@ -200,7 +200,7 @@ export async function logActivity(tx: Executor, input: ActivityInput): Promise<v
   });
 }
 
-/** Emits `task` upserts (live rows) or deletes (soft-deleted rows) for `ids`. */
+/** Emits `task` upserts (live rows) or deletes (soft-deleted rows) for `ids` to their audience. */
 export async function emitTasks(
   tx: Executor,
   emit: MutationScope["emit"],
@@ -215,10 +215,10 @@ export async function emitTasks(
     .where(inArray(blocks.taskId, list));
   const blockOf = new Map(blockRows.map((b) => [b.taskId, b.id]));
   const labelsOf = await labelIdsByTask(tx, list);
+  const channelsOf = await taskChannels(tx, list);
   for (const row of rows) {
-    const channels = row.rootListId ? [channel.list(row.rootListId)] : [];
     await emit(
-      channels,
+      channelsOf.get(row.id) ?? [],
       row.deletedAt
         ? { op: "delete", entity: "task", id: row.id, version: row.version }
         : {
@@ -381,7 +381,7 @@ export async function touchTasks(
     .where(and(inArray(blocks.taskId, list), isNull(blocks.deletedAt)))
     .returning();
   for (const dto of await blockDtos(tx, touched)) {
-    await emit([channel.list(dto.rootListId)], {
+    await emit(await blockChannels(tx, dto), {
       op: "upsert",
       entity: "block",
       id: dto.id,
@@ -390,4 +390,66 @@ export async function touchTasks(
     });
   }
   await emitTasks(tx, emit, list);
+}
+
+/** The live block that shows a task in its list or parent task, if any. */
+export async function liveBlockOfTask(db: Executor, taskId: string): Promise<BlockRow | null> {
+  const [row] = await db
+    .select()
+    .from(blocks)
+    .where(and(eq(blocks.taskId, taskId), isNull(blocks.deletedAt)));
+  return row ?? null;
+}
+
+/**
+ * `patchTask` for callers without a block store (PATCH /tasks/:id, Reschedule all): when
+ * something changed, the task's block follows (title content, version) and both emit.
+ */
+export async function applyTaskChange(
+  tx: Executor,
+  emit: MutationScope["emit"],
+  actorId: string,
+  task: TaskRow,
+  change: TaskChange,
+  now = new Date(),
+): Promise<{ task: TaskRow; block: BlockRow | null }> {
+  const updated = await patchTask(tx, task, change, actorId, now);
+  let block = await liveBlockOfTask(tx, task.id);
+  if (!updated) return { task, block };
+  if (block) {
+    const [changed] = await tx
+      .update(blocks)
+      .set({
+        ...(change.inline ? { content: { inline: change.inline } } : {}),
+        version: sql`${blocks.version} + 1`,
+      })
+      .where(eq(blocks.id, block.id))
+      .returning();
+    block = changed ?? block;
+    const [dto] = await blockDtos(tx, [block]);
+    if (dto) {
+      await emit(await blockChannels(tx, dto), {
+        op: "upsert",
+        entity: "block",
+        id: dto.id,
+        version: dto.version,
+        data: dto,
+      });
+    }
+  }
+  await emitTasks(tx, emit, [task.id]);
+  return { task: updated, block };
+}
+
+/** Task DTOs for many rows, with their blocks and labels. */
+export async function taskDtosOf(db: Executor, rows: readonly TaskRow[]): Promise<Task[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+  const blockRows = await db
+    .select({ id: blocks.id, taskId: blocks.taskId })
+    .from(blocks)
+    .where(and(inArray(blocks.taskId, ids), isNull(blocks.deletedAt)));
+  const blockOf = new Map(blockRows.map((b) => [b.taskId, b.id]));
+  const labelsOf = await labelIdsByTask(db, ids);
+  return rows.map((r) => taskDto(r, blockOf.get(r.id) ?? null, labelsOf.get(r.id) ?? []));
 }

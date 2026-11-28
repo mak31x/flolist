@@ -72,14 +72,19 @@ import { filterSlashItems } from "./slash.ts";
 import { SlashMenu } from "./SlashMenu.tsx";
 import { useSlash } from "./use-slash.ts";
 import { useBlockStore } from "./use-block-store.ts";
+import { dropTargetAt, markDropTarget } from "./drop-targets.ts";
 import { playCompleteSound } from "../../platform/index.ts";
 import { usePicker } from "../properties/picker-store.ts";
 import {
   deleteBlocks,
   duplicateBlocks,
+  addToInbox,
+  removeFromList,
+  runTaskAction,
   toggleComplete,
   type TaskActionHost,
 } from "../tasks/actions.tsx";
+import { useInboxActions } from "../task-views/inbox-actions.ts";
 import { SelectionBar } from "../tasks/SelectionBar.tsx";
 import { topLevel } from "../tasks/task-ops.ts";
 import { TaskActionsContext, type TaskActionsContextValue } from "../tasks/task-actions-context.ts";
@@ -95,72 +100,27 @@ import {
 } from "./tree.ts";
 
 /** Where the pointer is now, for mouse and touch drags (keyboard drags only reorder). */
-function pointerOf(event: DragMoveEvent | DragEndEvent): { x: number; y: number } | null {
-  const start = event.activatorEvent;
-  let x: number | undefined;
-  let y: number | undefined;
-  if (start instanceof MouseEvent) {
-    x = start.clientX;
-    y = start.clientY;
-  } else if (typeof TouchEvent !== "undefined" && start instanceof TouchEvent) {
-    x = start.touches[0]?.clientX;
-    y = start.touches[0]?.clientY;
-  }
-  if (x === undefined || y === undefined) return null;
-  return { x: x + event.delta.x, y: y + event.delta.y };
-}
-
-/**
- * A list that takes the dragged block: a sublist row whose middle the pointer is over (judged
- * by the row's resting place, since sorting may have shifted it), or a sidebar list.
- */
-function dropTargetAt(
-  event: DragMoveEvent | DragEndEvent,
-  blocks: readonly Block[],
-): HTMLElement | null {
-  const point = pointerOf(event);
-  if (!point) return null;
-  const { over, active } = event;
-  const overBlock = over && over.id !== active.id ? blocks.find((b) => b.id === over.id) : null;
-  if (over && overBlock?.type === "sublist") {
-    const band = over.rect.height / 4;
-    if (point.y > over.rect.top + band && point.y < over.rect.top + over.rect.height - band) {
-      return document.querySelector<HTMLElement>(
-        `[data-block-id="${overBlock.id}"] [data-drop-list-id]`,
-      );
-    }
-  }
-  if (typeof document.elementsFromPoint !== "function") return null;
-  for (const el of document.elementsFromPoint(point.x, point.y)) {
-    if (el.closest("[data-block-editor]")) continue;
-    const target = el.closest<HTMLElement>("[data-drop-list-id]");
-    if (target) return target;
-  }
-  return null;
-}
-
 /** While a block hovers a sublist row, the rows hold still so the row stays under it. */
 const holdStill: SortingStrategy = () => null;
 
-let marked: HTMLElement | null = null;
-function markDropTarget(el: HTMLElement | null) {
-  if (marked === el) return;
-  marked?.removeAttribute("data-drop-target");
-  el?.setAttribute("data-drop-target", "");
-  marked = el;
-}
-
-/** Mod+Shift+D in a task title duplicates the task (keyboard-shortcuts.md, Flolist add). */
+/**
+ * Task-action keys in a task title: Mod+Shift+D duplicates (Flolist add), Mod+Shift+I adds
+ * to the Inbox, Mod+Shift+R removes from the list (keyboard-shortcuts.md → Task views).
+ */
 function duplicateKey(host: TaskActionHost | null, block: Block, event: KeyboardEvent): boolean {
-  if (block.type !== "task" || !isModKey(event, "d", true) || !host) return false;
+  if (block.type !== "task" || !host) return false;
+  if (isModKey(event, "d", true)) duplicateBlocks(host, [block]);
+  else if (isModKey(event, "i", true)) addToInbox(host, [block]);
+  else if (isModKey(event, "r", true) && host.listId) removeFromList(host, [block]);
+  else return false;
   event.preventDefault();
-  duplicateBlocks(host, [block]);
   return true;
 }
 
 /**
  * Task-action keys while blocks are selected (keyboard-shortcuts.md → Task views): Mod+D
- * completes, Mod+Shift+D duplicates, Mod+Backspace/Delete deletes, Mod+Enter opens the task.
+ * completes, Mod+Shift+D duplicates, Mod+Shift+I adds to the Inbox, Mod+Shift+R removes from
+ * the list, Mod+Backspace/Delete deletes, Mod+Enter opens the task.
  */
 function selectionActionKey(
   host: TaskActionHost,
@@ -169,6 +129,8 @@ function selectionActionKey(
 ): boolean {
   if (isModKey(event, "d")) toggleComplete(host, selected);
   else if (isModKey(event, "d", true)) duplicateBlocks(host, selected);
+  else if (isModKey(event, "i", true)) runTaskAction("addToInbox", selected, host);
+  else if (isModKey(event, "r", true) && host.listId) removeFromList(host, selected);
   else if (isModKey(event, "backspace") || isModKey(event, "delete")) deleteBlocks(host, selected);
   else if (isModKey(event, "enter")) {
     const task = selected.find((b) => b.type === "task");
@@ -181,7 +143,7 @@ function selectionActionKey(
 const docToInlineEmpty = (editor: Editor) => editor.state.doc.textContent.length === 0;
 
 /** A not-yet-saved empty paragraph shown in an empty list; typing into it creates it. */
-function phantomBlock(id: string, root: BlockContainer, rootListId: string): Block {
+function phantomBlock(id: string, root: BlockContainer, rootListId: string | null): Block {
   const now = new Date(0).toISOString();
   return {
     id,
@@ -204,12 +166,16 @@ function phantomBlock(id: string, root: BlockContainer, rootListId: string): Blo
 }
 
 /**
- * The block editor of one list (D-007, lists-and-blocks.md → Editor behaviour): a column of
- * blocks, each with its own inline editor; the keyboard controller moves between them.
+ * The block editor of one page (D-007, lists-and-blocks.md → Editor behaviour): a column of
+ * blocks, each with its own inline editor; the keyboard controller moves between them. A page
+ * is a list, or (`pageKind: "task"`, M4.1) the body page of a task in no list, whose id is
+ * then `listId` and whose workspace comes from `workspaceId`.
  */
 export function BlockEditor({
   listId,
   rootListId,
+  pageKind = "list",
+  workspaceId: pageWorkspaceId,
   onExitTop,
   view = DEFAULT_LIST_VIEW_PREFS,
   root: rootProp,
@@ -217,7 +183,10 @@ export function BlockEditor({
   placeholder,
 }: {
   listId: string;
-  rootListId: string;
+  rootListId: string | null;
+  pageKind?: BlockContainer["type"];
+  /** The workspace of a task page (list pages read it from the list). */
+  workspaceId?: string;
   /** What this editor shows: the list (default), or one task's body (details panel). */
   root?: BlockContainer;
   /** Opens a task's details (the row's arrow, Mod+Enter). */
@@ -231,14 +200,14 @@ export function BlockEditor({
 }) {
   const me = useMe();
   const qc = useQueryClient();
-  const { data: blocks } = useQuery(blocksQuery(listId));
+  const { data: blocks } = useQuery(blocksQuery(listId, pageKind));
   const { data: labels } = useQuery(labelsQuery);
   const pending = usePendingUploads((s) => s.items);
-  const store = useBlockStore(listId, rootListId, me.id);
+  const store = useBlockStore(listId, rootListId, me.id, pageKind);
   const [phantomId, setPhantomId] = useState(uuidv7);
   const [link, setLink] = useState<LinkRequest | null>(null);
 
-  const rootType = rootProp?.type ?? "list";
+  const rootType = rootProp?.type ?? pageKind;
   const rootId = rootProp?.id ?? listId;
   const root = useMemo<BlockContainer>(() => ({ type: rootType, id: rootId }), [rootType, rootId]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -308,6 +277,7 @@ export function BlockEditor({
     root,
     qc,
     workspaceId: async () => {
+      if (pageWorkspaceId) return pageWorkspaceId;
       // A just-created list is cached before the server has named its workspace.
       const cached = qc.getQueryData<{ workspaceId: string } | null>(listQuery(listId).queryKey);
       if (cached?.workspaceId) return cached.workspaceId;
@@ -485,8 +455,8 @@ export function BlockEditor({
     },
     [ctx, store, me.soundsEnabled],
   );
-  const { data: listRow } = useQuery(listQuery(listId));
-  const workspaceOfList = listRow?.workspaceId;
+  const { data: listRow } = useQuery({ ...listQuery(listId), enabled: pageKind === "list" });
+  const workspaceOfList = pageWorkspaceId ?? listRow?.workspaceId;
   const taskFields = useMemo<TaskFieldsContextValue | null>(
     () =>
       workspaceOfList
@@ -500,9 +470,11 @@ export function BlockEditor({
         : null,
     [workspaceOfList, store, ctx],
   );
+  const inbox = useInboxActions();
   const host = useMemo<TaskActionHost>(
     () => ({
-      listId,
+      inbox,
+      listId: pageKind === "list" ? listId : null,
       workspaceId: workspaceOfList,
       qc,
       commands: ctx.commands,
@@ -524,7 +496,7 @@ export function BlockEditor({
         else if (ids[0]) focusBlock(ids[0], "end");
       },
     }),
-    [listId, workspaceOfList, qc, ctx, store, me.soundsEnabled],
+    [inbox, listId, pageKind, workspaceOfList, qc, ctx, store, me.soundsEnabled],
   );
   useLayoutEffect(() => {
     hostRef.current = host;
@@ -642,13 +614,27 @@ export function BlockEditor({
       const selected = selectionRef.current ? selectedBlocks(ctx) : [];
       const group =
         moving && selected.some((b) => b.id === moving.id) ? topLevel(all, selected) : [];
+      // Dropped on the sidebar's Inbox: the tasks are added to it (they stay in the list).
+      if (target && target.dataset.dropInbox !== undefined) {
+        const tasks = (group.length > 0 ? group : moving ? [moving] : []).flatMap((b) =>
+          b.type === "task" && b.taskId ? [b.taskId] : [],
+        );
+        const host = hostRef.current;
+        if (tasks.length > 0 && host?.inbox) {
+          const { inbox } = host;
+          void host.commands.flush().then(() => {
+            inbox.add(tasks);
+          });
+        }
+        return;
+      }
       // Dropped on a sublist row or a sidebar list: the block moves into that list.
       if (target) {
         const listOf = target.dataset.dropListId;
         const ids = (group.length > 0 ? group : moving ? [moving] : [])
           .filter((b) => b.sublistId !== listOf)
           .map((b) => b.id);
-        if (listOf && listOf !== listId && ids.length > 0) {
+        if (pageKind === "list" && listOf && listOf !== listId && ids.length > 0) {
           void moveBlocksTo(ctx, ids, listOf).then((moved) => {
             if (moved) ctx.selection.clear();
           });
@@ -684,7 +670,7 @@ export function BlockEditor({
         },
       ]);
     },
-    [ctx, store, listId, moveGroup],
+    [ctx, store, listId, pageKind, moveGroup],
   );
   const onRequestLink = useCallback((editor: Editor) => {
     setLink(linkRequestFor(editor));
@@ -845,7 +831,7 @@ export function BlockEditor({
       {slash && (
         <SlashMenu
           listId={`slash-${slash.blockId}`}
-          items={filterSlashItems(slash.query, t)}
+          items={filterSlashItems(slash.query, t, slash.inTask)}
           active={slash.active}
           anchor={slash.anchor}
           onPick={slashApi.pick}

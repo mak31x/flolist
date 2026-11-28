@@ -1,6 +1,7 @@
 import { EmptyState, KbdHint, SkeletonSquiggle, cn, isApplePlatform } from "@flolist/ui";
 import { CirclePlus } from "lucide-react";
 import type { ReactNode } from "react";
+import { t } from "../i18n/index.ts";
 
 type PageProps = {
   title: string;
@@ -34,26 +35,36 @@ export function Page({ title, secondary, actions, wide = false, children }: Page
   );
 }
 
-/** "New task ^N" row at the top of task views (keyboard-shortcuts.md: ⌘N in apps, ^N on the web). */
-export function NewTaskRow() {
+/**
+ * "New task ^N" row at the top of task views (ui-design §2; keyboard-shortcuts.md: ⌘N in the
+ * apps, ^N on the web, Alt+N off Apple platforms).
+ */
+export function NewTaskRow({
+  onClick,
+  disabled = false,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
-      disabled
-      className="flex h-9 w-full items-center gap-2.5 rounded-lg px-1 text-body text-text-muted"
+      onClick={onClick}
+      // Off until the view has loaded, so the new row can show (and take typing) at once.
+      disabled={disabled}
+      className="flex h-9 w-full items-center gap-2.5 rounded-lg px-1 text-body text-text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-60 disabled:hover:text-text-muted"
     >
       <CirclePlus aria-hidden className="size-4 text-accent" />
-      New task
+      {t("taskViews.newTask")}
       <KbdHint shortcut={isApplePlatform() ? "Ctrl+N" : "Alt+N"} />
     </button>
   );
 }
 
-/** Placeholder body for task views until tasks exist (M2). */
+/** An empty task view: skeleton squiggles and a line of text (views.md → Inbox, Today). */
 export function EmptyTasks({ message }: { message: string }) {
   return (
     <>
-      <NewTaskRow />
       <SkeletonSquiggle className="mt-1" />
       <EmptyState className="py-8">{message}</EmptyState>
     </>

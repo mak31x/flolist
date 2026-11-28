@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { inlineContentSchema, inlineText, type InlineNode } from "./blocks.ts";
+import { blockSchema, inlineContentSchema, inlineText, type InlineNode } from "./blocks.ts";
 import { clientMutationSchema } from "./lists.ts";
 import { prioritySchema, taskDueSchema, taskFieldsInputSchema } from "./task-fields.ts";
 
@@ -64,6 +64,27 @@ export const updateTaskSchema = clientMutationSchema
     { error: "Send at least one field to change" },
   );
 export type UpdateTask = z.infer<typeof updateTaskSchema>;
+
+/**
+ * `GET /tasks/:id/page`: the body page of a task that lives in no list (Inbox-only, M4.1): the
+ * live blocks of its body and of its subtasks' bodies. `taskId` is the page's top-level task
+ * (asking for a subtask answers its top-level task's page). Tasks in a list use their list's
+ * page (`GET /lists/:id/blocks`, D-056).
+ */
+export const taskPageSchema = z.object({ taskId: z.uuid(), items: z.array(blockSchema) });
+export type TaskPage = z.infer<typeof taskPageSchema>;
+
+/**
+ * `POST /tasks/:id/move`: moves a task between a list and no list (M4.1). `listId: null` is
+ * "Remove from list": the task (a subtask becomes top-level) leaves its list for the caller's
+ * Inbox. A list id moves a top-level task in no list onto that list's end, out of the caller's
+ * Inbox. Moves between lists use `POST /lists/:id/blocks/move-to`.
+ */
+export const moveTaskSchema = clientMutationSchema.extend({ listId: z.uuid().nullable() });
+export type MoveTask = z.infer<typeof moveTaskSchema>;
+
+/** `DELETE /tasks/:id` and `POST /tasks/:id/restore` (tasks in no list; list tasks use blocks). */
+export const taskTrashSchema = clientMutationSchema;
 
 // Activity log (tasks.md → Activity log). Each phase adds the actions of its fields. Old/new
 // values: `due_changed` → TaskDue | null, `priority_changed` → Priority, `labels_changed` →

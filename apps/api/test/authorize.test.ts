@@ -2,10 +2,14 @@ import {
   listPermissionFixtures,
   permissionFixtures,
   sectionPermissionFixtures,
+  taskPermissionFixtures,
   type Action,
   type ListAction,
   type SectionAction,
+  type TaskAction,
 } from "@flolist/shared";
+import { tasks } from "@flolist/db";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authorize } from "../src/authz/authorize.ts";
 import { ApiException } from "../src/lib/errors.ts";
@@ -15,7 +19,11 @@ import {
   buildFixture,
   buildListFixture,
   buildSectionFixture,
+  buildTaskFixture,
   jsonBody,
+  makeInboxOnlyTask,
+  makeList,
+  makeUser,
   send,
   testApp,
 } from "./factories.ts";
@@ -63,6 +71,15 @@ const routeFor: Partial<Record<Action, (id: string) => [string, RequestInit]>> =
       id: crypto.randomUUID(),
       workspaceId: id,
       name: "Errands",
+    }),
+  ],
+  "workspace.createTask": (id) => [
+    "/api/v1/inbox/tasks",
+    send("POST", {
+      clientMutationId: crypto.randomUUID(),
+      id: crypto.randomUUID(),
+      workspaceId: id,
+      position: "a0",
     }),
   ],
   "workspace.createList": (id) => [
@@ -170,5 +187,69 @@ describe("list and section routes against the permission fixtures", () => {
     const [path, init] = route(section.id);
     const res = await testApp(t.db).request(path, as(actor, init));
     expect(res.status).toBe(statusFor[f.expected]);
+  });
+});
+
+/** Every task action has a route; Inbox-only tasks resolve through their creator. */
+const taskRouteFor: Record<TaskAction, (id: string) => [string, RequestInit]> = {
+  "task.view": (id) => [`/api/v1/tasks/${id}`, {}],
+  "task.edit": (id) => [`/api/v1/tasks/${id}`, send("PATCH", { ...mutation(), priority: 2 })],
+};
+
+describe("authorize() and task routes against the task fixtures", () => {
+  it.each(taskPermissionFixtures.map((f) => [f.name, f] as const))("%s", async (_name, f) => {
+    const { actor, task } = await buildTaskFixture(t.db, f.setup);
+    const result = authorize(t.db, actor, f.action, { type: "task", id: task.id });
+    const code = codeFor[f.expected];
+    if (code === null) {
+      await expect(result).resolves.toMatchObject({ task: { id: task.id }, list: null });
+    } else {
+      await expect(result).rejects.toSatisfy((e) => e instanceof ApiException && e.code === code);
+    }
+  });
+
+  it.each(taskPermissionFixtures.map((f) => [`route: ${f.name}`, f] as const))(
+    "%s",
+    async (_name, f) => {
+      const { actor, task } = await buildTaskFixture(t.db, f.setup);
+      const [path, init] = taskRouteFor[f.action](task.id);
+      const res = await testApp(t.db).request(path, as(actor, init));
+      expect(res.status).toBe(statusFor[f.expected]);
+    },
+  );
+
+  it("resolves an Inbox-only subtask through its top-level task", async () => {
+    const owner = await makeUser(t.db);
+    const stranger = await makeUser(t.db);
+    const parent = await makeInboxOnlyTask(t.db, owner);
+    // Created by someone else, but it sits under the owner's task.
+    const sub = await makeInboxOnlyTask(t.db, stranger, {
+      parentTaskId: parent.id,
+      workspaceId: parent.workspaceId,
+    });
+    await expect(
+      authorize(t.db, owner, "task.edit", { type: "task", id: sub.id }),
+    ).resolves.toMatchObject({ task: { id: sub.id } });
+    await expect(
+      authorize(t.db, stranger, "task.view", { type: "task", id: sub.id }),
+    ).rejects.toSatisfy((e) => e instanceof ApiException && e.code === "NOT_FOUND");
+  });
+
+  it("maps task actions onto the home list for tasks in a list", async () => {
+    const owner = await makeUser(t.db);
+    const stranger = await makeUser(t.db);
+    const list = await makeList(t.db, owner);
+    const task = await makeInboxOnlyTask(t.db, stranger, { workspaceId: list.workspaceId });
+    await t.db
+      .update(tasks)
+      .set({ listId: list.id, rootListId: list.id })
+      .where(eq(tasks.id, task.id));
+    await expect(
+      authorize(t.db, owner, "task.edit", { type: "task", id: task.id }),
+    ).resolves.toMatchObject({ list: { id: list.id }, root: { id: list.id } });
+    // Creating a task doesn't grant access once it lives in someone else's list.
+    await expect(
+      authorize(t.db, stranger, "task.view", { type: "task", id: task.id }),
+    ).rejects.toSatisfy((e) => e instanceof ApiException && e.code === "NOT_FOUND");
   });
 });

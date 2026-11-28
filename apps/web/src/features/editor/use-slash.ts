@@ -11,6 +11,8 @@ export interface SlashState {
   query: string;
   active: number;
   anchor: { left: number; top: number; height: number };
+  /** Opened in a task body, which can't hold sublists. */
+  inTask: boolean;
 }
 
 export type SlashApi = KeyContext["slash"] & {
@@ -37,7 +39,9 @@ export function useSlash(getCtx: () => KeyContext): [SlashState | null, SlashApi
       current = next;
       setState(next);
     };
-    const items = (s: SlashState) => filterSlashItems(s.query, t);
+    // Task bodies can't hold sublists.
+    const inTask = () => getCtx().root.type === "task";
+    const items = (s: SlashState) => filterSlashItems(s.query, t, s.inTask);
     const pick: SlashApi["pick"] = (type) => {
       const s = current;
       set(null);
@@ -58,7 +62,7 @@ export function useSlash(getCtx: () => KeyContext): [SlashState | null, SlashApi
         } catch {
           // jsdom: no layout.
         }
-        set({ blockId: block.id, query: "", active: 0, anchor });
+        set({ blockId: block.id, query: "", active: 0, anchor, inTask: inTask() });
       },
       onKey: (block, event) => {
         const s = current;
@@ -108,7 +112,7 @@ export function useSlash(getCtx: () => KeyContext): [SlashState | null, SlashApi
           return;
         }
         const query = typed.slice(1);
-        const none = filterSlashItems(query, t).length === 0;
+        const none = items({ ...s, query }).length === 0;
         if (query.length > MAX_QUERY || (none && /\s$/.test(query))) {
           set(null);
           return;
@@ -134,7 +138,7 @@ export function useSlash(getCtx: () => KeyContext): [SlashState | null, SlashApi
     const dom = editorFor(state.blockId)?.view.dom;
     if (!dom) return;
     const listId = `slash-${state.blockId}`;
-    const item = filterSlashItems(state.query, t)[state.active];
+    const item = filterSlashItems(state.query, t, state.inTask)[state.active];
     dom.setAttribute("aria-controls", listId);
     dom.setAttribute("aria-expanded", "true");
     if (item) dom.setAttribute("aria-activedescendant", `${listId}-${item.type}`);

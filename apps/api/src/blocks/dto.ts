@@ -4,6 +4,7 @@ import {
   type blocks,
   type blockTypes,
   type Executor,
+  type inboxReasons,
   type labelColors,
   type taskMaxPriority,
 } from "@flolist/db";
@@ -12,6 +13,7 @@ import {
   type Block,
   type BlockTask,
   type BlockType,
+  type INBOX_REASONS,
   type LabelColor,
   type MAX_INDENT,
   type PRIORITIES,
@@ -28,7 +30,8 @@ export const blockConstantsMatch: [
   Same<typeof blockMaxIndent, typeof MAX_INDENT>,
   Same<(typeof labelColors)[number], LabelColor>,
   Same<typeof taskMaxPriority, LastIndex<typeof PRIORITIES>>,
-] = [true, true, true, true];
+  Same<(typeof inboxReasons)[number], (typeof INBOX_REASONS)[number]>,
+] = [true, true, true, true, true];
 type LastIndex<T extends readonly unknown[]> = T extends readonly [...infer Rest, unknown]
   ? Rest["length"]
   : never;

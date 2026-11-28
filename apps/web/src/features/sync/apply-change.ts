@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { applyBlockChange, type BlockChangeEvent } from "../editor/store.ts";
 import { listKey, listPrefsKey, listsKey, sidebarKey } from "../lists/api.ts";
 import { activityKey } from "../tasks/api.ts";
+import { applyTaskViewChange } from "../task-views/api.ts";
 import { applyLabelChange } from "../properties/labels-api.ts";
 import {
   removeEntry,
@@ -36,8 +37,14 @@ export function applyChange(qc: QueryClient, event: ChangeEvent): void {
       applyLabelChange(qc, event);
       return;
     case "task":
-      // Rows show tasks through their blocks (block events); the activity log refetches.
+      // List rows show tasks through their blocks (block events); the activity log refetches,
+      // and the Inbox and Today views patch or refetch.
       void qc.invalidateQueries({ queryKey: activityKey(event.id) });
+      applyTaskViewChange(qc, event);
+      return;
+    case "inboxItem":
+    case "todayOrder":
+      applyTaskViewChange(qc, event);
       return;
     case "list": {
       if (qc.isMutating({ mutationKey: mutationKeys.list(event.id) }) > 0) return;

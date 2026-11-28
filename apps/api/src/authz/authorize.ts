@@ -1,9 +1,11 @@
-import { lists, member, sections, workspaces, type Executor } from "@flolist/db";
+import { lists, member, sections, tasks, workspaces, type Executor } from "@flolist/db";
 import {
   decide,
+  listActionForTask,
   type Decision,
   type ListAction,
   type SectionAction,
+  type TaskAction,
   type WorkspaceAction,
   type WorkspaceRole,
   type WorkspaceSubject,
@@ -15,11 +17,20 @@ import type { AuthUser } from "../types.ts";
 export type Resource =
   | { type: "workspace"; id: string }
   | { type: "list"; id: string }
-  | { type: "section"; id: string };
+  | { type: "section"; id: string }
+  | TaskResource;
+
+/** `lock` takes the task row `for update`, for mutations that rewrite it. */
+export interface TaskResource {
+  type: "task";
+  id: string;
+  lock?: boolean;
+}
 
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type ListRow = typeof lists.$inferSelect;
 export type SectionRow = typeof sections.$inferSelect;
+export type TaskRow = typeof tasks.$inferSelect;
 
 export interface Authorized {
   user: AuthUser;
@@ -35,6 +46,13 @@ export interface AuthorizedList {
 export interface AuthorizedSection {
   user: AuthUser;
   section: SectionRow;
+}
+export interface AuthorizedTask {
+  user: AuthUser;
+  task: TaskRow;
+  /** The home list and its root; both null for a task that lives in no list (Inbox-only). */
+  list: ListRow | null;
+  root: ListRow | null;
 }
 
 /**
@@ -69,9 +87,15 @@ export async function authorize(
 export async function authorize(
   db: Executor,
   user: AuthUser | null,
-  action: WorkspaceAction | ListAction | SectionAction,
+  action: TaskAction,
+  resource: TaskResource,
+): Promise<AuthorizedTask>;
+export async function authorize(
+  db: Executor,
+  user: AuthUser | null,
+  action: WorkspaceAction | ListAction | SectionAction | TaskAction,
   resource: Resource,
-): Promise<Authorized | AuthorizedList | AuthorizedSection> {
+): Promise<Authorized | AuthorizedList | AuthorizedSection | AuthorizedTask> {
   if (!user) throw unauthenticated();
   switch (resource.type) {
     case "workspace":
@@ -80,6 +104,8 @@ export async function authorize(
       return authorizeList(db, user, action as ListAction, resource.id);
     case "section":
       return authorizeSection(db, user, action as SectionAction, resource.id);
+    case "task":
+      return authorizeTask(db, user, action as TaskAction, resource);
   }
 }
 
@@ -168,4 +194,47 @@ async function authorizeSection(
   );
   if (!section) throw notFound("Section");
   return { user, section };
+}
+
+/**
+ * A task in a list is the list's (`task.view`/`task.edit` → `list.view`/`list.edit` on its home
+ * list, D-056). A task in no list (Inbox-only, M4.1) resolves through its top-level task: its
+ * creator is the only role until assigning (M7.3). A soft-deleted task, or one whose parent
+ * chain is gone, is NOT_FOUND.
+ */
+async function authorizeTask(
+  db: Executor,
+  user: AuthUser,
+  action: TaskAction,
+  resource: TaskResource,
+): Promise<AuthorizedTask> {
+  const query = db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, resource.id), isNull(tasks.deletedAt)))
+    .limit(1);
+  const [task] = resource.lock ? await query.for("update") : await query;
+  if (task?.listId) {
+    const { list, root } = await authorizeList(db, user, listActionForTask[action], task.listId);
+    return { user, task, list, root };
+  }
+  const top = task ? await topTask(db, task) : undefined;
+  const role = top && top.createdBy === user.id ? "creator" : null;
+  enforce(decide(action, { type: "task", role }), "Task");
+  if (!task) throw notFound("Task");
+  return { user, task, list: null, root: null };
+}
+
+/** The top-level task above `task` (itself when it has no parent); undefined if one is gone. */
+async function topTask(db: Executor, task: TaskRow): Promise<TaskRow | undefined> {
+  let current: TaskRow | undefined = task;
+  // Subtasks nest at most MAX_SUBTASK_DEPTH levels (D-056); the guard stops a corrupt cycle.
+  for (let hops = 0; current?.parentTaskId && hops < 16; hops += 1) {
+    [current] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, current.parentTaskId), isNull(tasks.deletedAt)))
+      .limit(1);
+  }
+  return current?.parentTaskId ? undefined : current;
 }
