@@ -57,6 +57,13 @@
       "when": 1795732505115,
       "tag": "0007_due_priority_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795862959480,
+      "tag": "0008_inbox_today",
+      "breakpoints": true
     }
   ]
 }

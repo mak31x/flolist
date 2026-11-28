@@ -1,4 +1,13 @@
-import { lists, member, organization, sections, user, workspaces, type Db } from "@flolist/db";
+import {
+  lists,
+  member,
+  organization,
+  sections,
+  tasks,
+  user,
+  workspaces,
+  type Db,
+} from "@flolist/db";
 import { eq } from "drizzle-orm";
 import type { WorkspaceKind, WorkspaceRole } from "@flolist/shared";
 import { createApp, type AppDeps } from "../src/app.ts";
@@ -180,4 +189,40 @@ export async function buildSectionFixture(
     isDefault: setup.section.isDefault,
   });
   return { actor, section };
+}
+
+/** A task in no list (Inbox-only) created by `owner` directly in the database. */
+export async function makeInboxOnlyTask(
+  db: Db,
+  owner: AuthUser,
+  values: { title?: string; parentTaskId?: string; workspaceId?: string; deleted?: boolean } = {},
+) {
+  const workspaceId = values.workspaceId ?? (await makePersonalWorkspace(db, owner)).id;
+  const title = values.title ?? "A task";
+  const [row] = await db
+    .insert(tasks)
+    .values({
+      workspaceId,
+      title,
+      titleInline: [{ type: "text", text: title }],
+      parentTaskId: values.parentTaskId ?? null,
+      createdBy: owner.id,
+      deletedAt: values.deleted ? new Date() : null,
+    })
+    .returning();
+  if (!row) throw new Error("insert task failed");
+  return row;
+}
+
+/** The world a task permission fixture describes (a task in no list). */
+export async function buildTaskFixture(
+  db: Db,
+  setup: { task: { deleted?: boolean }; actorRole: "creator" | "none" },
+) {
+  const actor = await makeUser(db, "Actor");
+  const other = await makeUser(db, "Other");
+  const task = await makeInboxOnlyTask(db, setup.actorRole === "creator" ? actor : other, {
+    deleted: setup.task.deleted ?? false,
+  });
+  return { actor, task };
 }

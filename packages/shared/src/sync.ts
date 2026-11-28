@@ -2,6 +2,8 @@ import { z } from "zod";
 import { blockSchema } from "./blocks.ts";
 import { taskSchema } from "./tasks.ts";
 import { labelSchema } from "./labels.ts";
+import { inboxItemSchema } from "./inbox.ts";
+import { todayOrderSchema } from "./today.ts";
 import { listSchema, listViewPrefsSchema, sectionSchema, sidebarEntrySchema } from "./lists.ts";
 
 /**
@@ -76,8 +78,24 @@ export const changeEventSchema = z.union([
   }),
   z.object({
     ...changeBase,
+    op: z.literal("upsert"),
+    /** A task in the user's Inbox (`user:<id>` only); `id` is the task id. */
+    entity: z.literal("inboxItem"),
+    id: z.uuid(),
+    data: inboxItemSchema,
+  }),
+  z.object({
+    ...changeBase,
+    op: z.literal("upsert"),
+    /** The user's manual Today order of one task on one day (`user:<id>` only); `id` = task id. */
+    entity: z.literal("todayOrder"),
+    id: z.uuid(),
+    data: todayOrderSchema,
+  }),
+  z.object({
+    ...changeBase,
     op: z.literal("delete"),
-    entity: z.enum(["list", "section", "sidebarEntry", "block", "task", "label"]),
+    entity: z.enum(["list", "section", "sidebarEntry", "block", "task", "label", "inboxItem"]),
     id: z.uuid(),
   }),
 ]);

@@ -143,10 +143,29 @@ const inboxRoute = createRoute({
   component: InboxView,
   staticData: { panel: { kind: "cover", cover: "misty-mountains" } },
 });
+/** `?date=YYYY-MM-DD` shows another day (‹ › and the calendar); absent = today. */
+const todaySearch = (s: Record<string, unknown>) => {
+  const date = optionalString(s.date);
+  return compact({ date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined });
+};
+const inboxTaskRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/inbox/tasks/$taskId",
+  component: InboxView,
+  staticData: { panel: { kind: "cover", cover: "misty-mountains" } },
+});
 const todayRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/today",
   component: TodayView,
+  validateSearch: todaySearch,
+  staticData: { panel: { kind: "cover", cover: "pastel-ocean" } },
+});
+const todayTaskRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/today/tasks/$taskId",
+  component: TodayView,
+  validateSearch: todaySearch,
   staticData: { panel: { kind: "cover", cover: "pastel-ocean" } },
 });
 const weekRoute = createRoute({
@@ -223,7 +242,9 @@ export const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     inboxRoute,
+    inboxTaskRoute,
     todayRoute,
+    todayTaskRoute,
     weekRoute,
     allTasksRoute,
     updatesRoute,

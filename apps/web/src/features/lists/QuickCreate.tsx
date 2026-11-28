@@ -8,6 +8,7 @@ import { useShell } from "../../shell/ui-store.ts";
 import { sidebarQuery } from "./api.ts";
 import { useCreateSection } from "./mutations.ts";
 import { useCreateAndOpenList } from "./use-create-and-open.ts";
+import { useQuickNewTask } from "../task-views/new-task.ts";
 
 type QuickCreateProps = {
   /** The button that opens the menu (sidebar "+", or the phone FAB). */
@@ -20,7 +21,7 @@ type QuickCreateProps = {
 };
 
 /**
- * Quick create (views.md → Sidebar §5): New task (with tasks, M3) · New list · New section.
+ * Quick create (views.md → Sidebar §5): New task (into the Inbox, M4.1) · New list · New section.
  */
 export function QuickCreate({
   trigger,
@@ -29,6 +30,7 @@ export function QuickCreate({
   align = "start",
 }: QuickCreateProps) {
   const createList = useCreateAndOpenList();
+  const newTask = useQuickNewTask();
   const createSection = useCreateSection();
   const setRenaming = useShell((s) => s.setRenaming);
   const { data: sidebar } = useQuery(sidebarQuery);
@@ -46,7 +48,15 @@ export function QuickCreate({
           keepFocus.current = false;
         }}
       >
-        <MenuItem icon={<SquarePlus />} disabled>
+        <MenuItem
+          icon={<SquarePlus />}
+          disabled={!newTask}
+          onSelect={() => {
+            keepFocus.current = true;
+            onNavigate?.();
+            void newTask?.();
+          }}
+        >
           {t("sidebar.newTask")}
         </MenuItem>
         <MenuItem

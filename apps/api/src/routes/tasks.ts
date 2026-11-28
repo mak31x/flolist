@@ -1,68 +1,106 @@
 import { activityEvents, blocks, tasks, user as users, type Executor } from "@flolist/db";
 import {
   activityActionSchema,
-  channel,
+  blockBatchSchema,
   fileUrl,
   idParamSchema,
+  moveTaskSchema,
+  taskTrashSchema,
   updateTaskSchema,
   type ActivityPage,
-  type ListAction,
+  type TaskPage,
 } from "@flolist/shared";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { authorize } from "../authz/authorize.ts";
+import { authorize, type TaskRow } from "../authz/authorize.ts";
+import { applyBlockBatch, type BatchPage } from "../blocks/batch.ts";
 import { blockDtos } from "../blocks/dto.ts";
-import { notFound, unauthenticated } from "../lib/errors.ts";
+import { ApiException, notFound } from "../lib/errors.ts";
 import { validate } from "../middleware/validate.ts";
-import { runMutation } from "../sync/mutation.ts";
-import { dbOf, type AppEnv, type AuthUser } from "../types.ts";
-import { emitTasks, patchTask, taskDtoOf } from "../tasks/service.ts";
+import { runMutation, type MutationScope } from "../sync/mutation.ts";
+import { dbOf, type AppEnv } from "../types.ts";
+import { taskChannels, topTaskIds } from "../tasks/audience.ts";
+import { moveIntoList, removeFromList } from "../tasks/move-home.ts";
+import {
+  applyTaskChange,
+  emitTasks,
+  liveBlockOfTask,
+  logActivity,
+  restoreTaskTree,
+  taskDtoOf,
+  taskSubtreeIds,
+  trashTaskTree,
+} from "../tasks/service.ts";
 
-/**
- * A live task the caller may act on. Access is its home list's (D-045's rule for blocks, so
- * there are no task actions in the matrix yet); a task the caller can't see is NOT_FOUND.
- * Inbox-only tasks (no list) arrive with M4.1.
- */
-async function authorizeTask(
-  db: Executor,
-  user: AuthUser | null,
-  action: ListAction,
-  id: string,
-  lock = false,
-) {
-  const query = db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)));
-  const [task] = lock ? await query.for("update") : await query;
-  if (!user) throw unauthenticated();
-  if (!task?.listId) throw notFound("Task");
-  const access = await authorize(db, user, action, { type: "list", id: task.listId });
-  return { ...access, task };
+/** The top-level task of a task in no list; its body page is the subtasks' page too. */
+async function pageTaskOf(db: Executor, task: TaskRow): Promise<TaskRow> {
+  if (task.listId) {
+    throw new ApiException("CONFLICT", "This task's body is on its list's page");
+  }
+  if (!task.parentTaskId) return task;
+  const topId = (await topTaskIds(db, [task.id])).get(task.id);
+  const [top] = topId
+    ? await db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, topId), isNull(tasks.deletedAt)))
+    : [];
+  if (!top) throw notFound("Task");
+  return top;
 }
 
-async function blockOf(db: Executor, taskId: string) {
-  const [row] = await db
-    .select()
-    .from(blocks)
-    .where(and(eq(blocks.taskId, taskId), isNull(blocks.deletedAt)));
-  return row ?? null;
+async function taskBatchPage(db: Executor, top: TaskRow): Promise<BatchPage> {
+  return {
+    listId: null,
+    rootListId: null,
+    workspaceId: top.workspaceId,
+    top: { type: "task", id: top.id },
+    blockChannels: (await taskChannels(db, [top.id])).get(top.id) ?? [],
+    listChannels: [],
+  };
+}
+
+/** Emits block deletes (trashed) or upserts (restored) for a task tree's body blocks. */
+async function emitBodyBlocks(
+  tx: Executor,
+  emit: MutationScope["emit"],
+  channels: string[],
+  rows: (typeof blocks.$inferSelect)[],
+  trashed: boolean,
+) {
+  if (trashed) {
+    for (const row of rows) {
+      await emit(channels, { op: "delete", entity: "block", id: row.id, version: row.version });
+    }
+    return;
+  }
+  for (const dto of await blockDtos(tx, rows)) {
+    await emit(channels, {
+      op: "upsert",
+      entity: "block",
+      id: dto.id,
+      version: dto.version,
+      data: dto,
+    });
+  }
 }
 
 export const taskRoutes = new Hono<AppEnv>()
   /** The task as the details panel shows it. */
   .get("/:id", validate("param", idParamSchema), async (c) => {
     const db = dbOf(c);
-    const { task } = await authorizeTask(db, c.get("user"), "list.view", c.req.valid("param").id);
-    const block = await blockOf(db, task.id);
+    const { task } = await authorize(db, c.get("user"), "task.view", {
+      type: "task",
+      id: c.req.valid("param").id,
+    });
+    const block = await liveBlockOfTask(db, task.id);
     return c.json(await taskDtoOf(db, task, block?.id ?? null));
   })
 
   /**
    * Changes the title, completion, due date, priority or labels (field-level LWW, D-006) from
-   * places without the
-   * list's block store (the details panel header now, Inbox/Today later). The task block's
-   * content follows the title in the same transaction.
+   * places without a block store (the details panel header, Inbox and Today rows). The task
+   * block's content follows the title in the same transaction.
    */
   .patch(
     "/:id",
@@ -72,46 +110,162 @@ export const taskRoutes = new Hono<AppEnv>()
       const { id } = c.req.valid("param");
       const input = c.req.valid("json");
       return runMutation(c, input.clientMutationId, async ({ tx, user, emit }) => {
-        const { task, root } = await authorizeTask(tx, user, "list.edit", id, true);
-        const now = new Date();
-        const updated =
-          (await patchTask(
-            tx,
-            task,
-            {
-              inline: input.titleInline,
-              completed: input.completed,
-              due: input.due,
-              priority: input.priority,
-              labelIds: input.labelIds,
-            },
-            user.id,
-            now,
-          )) ?? task;
-        let block = await blockOf(tx, task.id);
-        if (block && updated !== task) {
-          const [changed] = await tx
-            .update(blocks)
-            .set({
-              ...(input.titleInline ? { content: { inline: input.titleInline } } : {}),
-              version: sql`${blocks.version} + 1`,
-            })
-            .where(eq(blocks.id, block.id))
-            .returning();
-          block = changed ?? block;
-          const [dto] = await blockDtos(tx, [block]);
-          if (dto) {
-            await emit([channel.list(root.id)], {
-              op: "upsert",
-              entity: "block",
-              id: dto.id,
-              version: dto.version,
-              data: dto,
-            });
-          }
-        }
-        if (updated !== task) await emitTasks(tx, emit, [task.id]);
+        const { task } = await authorize(tx, user, "task.edit", {
+          type: "task",
+          id,
+          lock: true,
+        });
+        const { task: updated, block } = await applyTaskChange(tx, emit, user.id, task, {
+          inline: input.titleInline,
+          completed: input.completed,
+          due: input.due,
+          priority: input.priority,
+          labelIds: input.labelIds,
+        });
         return { status: 200, body: await taskDtoOf(tx, updated, block?.id ?? null) };
+      });
+    },
+  )
+
+  /** The body page of a task in no list (`TaskPage`); a subtask answers its top task's page. */
+  .get("/:id/page", validate("param", idParamSchema), async (c) => {
+    const db = dbOf(c);
+    const { task } = await authorize(db, c.get("user"), "task.view", {
+      type: "task",
+      id: c.req.valid("param").id,
+    });
+    const top = await pageTaskOf(db, task);
+    const ids = await taskSubtreeIds(db, top.id);
+    const rows = await db
+      .select()
+      .from(blocks)
+      .where(
+        and(
+          eq(blocks.containerType, "task"),
+          inArray(blocks.containerId, ids),
+          isNull(blocks.deletedAt),
+        ),
+      )
+      .orderBy(asc(blocks.position), asc(blocks.id));
+    const body: TaskPage = { taskId: top.id, items: await blockDtos(db, rows) };
+    return c.json(body);
+  })
+
+  /**
+   * One editor command on the body page of a top-level task in no list (the same batch as a
+   * list page, `applyBlockBatch`). Blocks go into the task's body unless `container` names one
+   * of its subtasks.
+   */
+  .post(
+    "/:id/blocks/batch",
+    validate("param", idParamSchema),
+    validate("json", blockBatchSchema),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      const input = c.req.valid("json");
+      return runMutation(c, input.clientMutationId, async (scope) => {
+        const { task } = await authorize(scope.tx, scope.user, "task.edit", { type: "task", id });
+        const top = await pageTaskOf(scope.tx, task);
+        if (top.id !== task.id) {
+          throw new ApiException("CONFLICT", "Edit the page of the top-level task");
+        }
+        const body = await applyBlockBatch(scope, await taskBatchPage(scope.tx, top), input.ops);
+        return { status: 200, body };
+      });
+    },
+  )
+
+  /**
+   * Sends a top-level task in no list to Trash with its subtasks and body (trash root = the
+   * task). Tasks in a list are deleted through their block (the list's batch).
+   */
+  .delete(
+    "/:id",
+    validate("param", idParamSchema),
+    validate("json", taskTrashSchema),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      const { clientMutationId } = c.req.valid("json");
+      return runMutation(c, clientMutationId, async ({ tx, user, emit }) => {
+        const { task } = await authorize(tx, user, "task.edit", { type: "task", id, lock: true });
+        if (task.listId || task.parentTaskId) {
+          throw new ApiException("CONFLICT", "Delete this task through its block");
+        }
+        const channels = (await taskChannels(tx, [task.id])).get(task.id) ?? [];
+        const ids = await taskSubtreeIds(tx, task.id);
+        const body = await trashTaskTree(tx, task.id, task.id, user.id, new Date());
+        await emitBodyBlocks(tx, emit, channels, body, true);
+        await emitTasks(tx, emit, ids);
+        return { status: 200, body: { deleted: ids } };
+      });
+    },
+  )
+
+  /** Undo of DELETE /tasks/:id: brings the tree back (Trash restores it the same way, M6.1). */
+  .post(
+    "/:id/restore",
+    validate("param", idParamSchema),
+    validate("json", taskTrashSchema),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      const { clientMutationId } = c.req.valid("json");
+      return runMutation(c, clientMutationId, async ({ tx, user, emit }) => {
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, id)).for("update");
+        // Only the creator's own trashed top-level task in no list (the task resource rules).
+        if (
+          !task ||
+          task.listId ||
+          task.parentTaskId ||
+          task.createdBy !== user.id ||
+          task.trashRootId !== task.id
+        ) {
+          throw notFound("Task");
+        }
+        const body = await restoreTaskTree(tx, task.id);
+        const ids = await taskSubtreeIds(tx, task.id);
+        const channels = (await taskChannels(tx, [task.id])).get(task.id) ?? [];
+        await emitBodyBlocks(tx, emit, channels, body, false);
+        await emitTasks(tx, emit, ids);
+        const [restored] = await tx.select().from(tasks).where(eq(tasks.id, id));
+        if (restored)
+          await logActivity(tx, {
+            task: restored,
+            actorId: user.id,
+            action: "restored",
+            now: new Date(),
+          });
+        return { status: 200, body: { restored: ids } };
+      });
+    },
+  )
+
+  /**
+   * Moves a task between a list and no list (`MoveTask`): Remove from list (`listId: null`), or
+   * a top-level task in no list onto a list. Both need edit access to the task and the list.
+   */
+  .post(
+    "/:id/move",
+    validate("param", idParamSchema),
+    validate("json", moveTaskSchema),
+    async (c) => {
+      const { id } = c.req.valid("param");
+      const input = c.req.valid("json");
+      return runMutation(c, input.clientMutationId, async (scope) => {
+        const { tx, user } = scope;
+        const access = await authorize(tx, user, "task.edit", { type: "task", id, lock: true });
+        if (input.listId === null) {
+          if (!access.list || !access.root) {
+            throw new ApiException("CONFLICT", "This task isn't in a list");
+          }
+          await removeFromList(scope, access.task, access.list);
+          return { status: 200, body: { blockId: null } };
+        }
+        if (access.list) {
+          throw new ApiException("CONFLICT", "Move tasks between lists with move-to");
+        }
+        const target = await authorize(tx, user, "list.edit", { type: "list", id: input.listId });
+        const blockId = await moveIntoList(scope, access.task, target);
+        return { status: 200, body: { blockId } };
       });
     },
   )
@@ -119,7 +273,10 @@ export const taskRoutes = new Hono<AppEnv>()
   /** The activity log, oldest first (tasks.md → Activity log). */
   .get("/:id/activity", validate("param", idParamSchema), async (c) => {
     const db = dbOf(c);
-    const { task } = await authorizeTask(db, c.get("user"), "list.view", c.req.valid("param").id);
+    const { task } = await authorize(db, c.get("user"), "task.view", {
+      type: "task",
+      id: c.req.valid("param").id,
+    });
     const rows = await db
       .select({
         id: activityEvents.id,

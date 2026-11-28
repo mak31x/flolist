@@ -25,6 +25,7 @@
 - Header: title "Inbox", filter/sort button (pill), ⋮ menu (Hide completed, sort options). New task row with the ^N hint. Manual ordering is allowed (drag).
 - Subtasks show nested under their parent (from Superlist 1.59).
 - Empty: skeleton squiggles. The right panel shows a cover.
+- Flolist details [assumption] (D-075, D-077): a completed task keeps its Inbox row and is hidden while "Hide completed" is on (the default), so reopening brings it back. A task that lives in no list can't be removed from the Inbox; it leaves by moving to a list or being deleted. New and added tasks go to the top. Filter/sort settings are kept per device.
 
 ## Today `/today`
 - Title "Today" plus the date ("24 Nov"). Header pills: sort (default "Due date"), ⋮. Right side: ‹ previous day · calendar (jump to a date) · next day ›. Off today, the title shows the weekday and date.
@@ -33,6 +34,7 @@
 - New tasks created here are due on the displayed day and go to the Inbox.
 - Optional "Daily planning" reminder (mobile): a notification at a chosen time.
 - Manual ordering inside Today is stored per user per day [assumption].
+- Flolist details [assumption] (D-077): subtasks due that day show as their own rows; on another day, tasks due earlier than it show as Overdue; Reschedule all keeps each task's time; Today rows show their list's name. Off today the URL carries `?date=`.
 
 ## Week `/my-week` (title "My Week")
 - Horizontal columns, each ~260px, scrolling horizontally. The **first column** is the "unscheduled" source: by default **Inbox ▾**, and the dropdown can switch it to any list. It shows only tasks *without* a due date.

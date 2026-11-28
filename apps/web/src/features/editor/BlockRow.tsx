@@ -10,6 +10,7 @@ import { InlineEditor } from "./InlineEditor.tsx";
 import { AttachmentBlock, ImageBlock } from "./MediaBlocks.tsx";
 import { SublistBlock } from "./SublistBlock.tsx";
 import { TaskMarker, TaskTrailing } from "./TaskRow.tsx";
+import { coarsePointer } from "./select-gestures.ts";
 import { isDone } from "./task-utils.ts";
 import { TaskMetaLine } from "../properties/TaskProperties.tsx";
 import { useTaskFields } from "../properties/task-fields-context.ts";
@@ -130,9 +131,6 @@ const dividerBorder: Record<string, string> = {
  * One block: a sortable row with the hover handle, its marker (bullet, number, quote bar) and
  * its inline editor, or a divider (focusable as a whole).
  */
-/** Touch-first devices get long-press selection instead of the long-press context menu. */
-const coarsePointer = () =>
-  typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
 
 export const BlockRow = memo(function BlockRow(props: BlockRowProps) {
   const { block } = props;

@@ -13,7 +13,9 @@ import { Link, useParams } from "@tanstack/react-router";
 import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useThemeStore } from "../shell/theme-store.ts";
-import { EmptyTasks, Page } from "./Page.tsx";
+import { Page } from "./Page.tsx";
+export { InboxView } from "../features/task-views/InboxView.tsx";
+export { TodayView } from "../features/task-views/TodayView.tsx";
 import { LabelsTab } from "../features/properties/LabelsTab.tsx";
 import { settingsTabs } from "./settings-tabs.ts";
 import { SettingsCard } from "./SettingsCard.tsx";
@@ -22,25 +24,6 @@ import { useMe, useSaveTheme, useSignOut } from "../features/auth/hooks.ts";
 import { systemFirstDay } from "../platform/index.ts";
 import { resolveWeekStart } from "@flolist/shared";
 import { currentWeek } from "./week.ts";
-
-export function InboxView() {
-  return (
-    <Page title="Inbox">
-      <EmptyTasks message="Tasks you capture without a list land here." />
-    </Page>
-  );
-}
-
-export function TodayView() {
-  const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(
-    new Date(),
-  );
-  return (
-    <Page title="Today" secondary={date}>
-      <EmptyTasks message="Nothing due today. Enjoy the calm." />
-    </Page>
-  );
-}
 
 export function WeekView() {
   const me = useMe();

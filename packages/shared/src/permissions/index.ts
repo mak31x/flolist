@@ -17,6 +17,8 @@ export const workspaceActions = [
   "workspace.uploadFile",
   /** Create a list owned by this workspace (lists-and-blocks.md → Lists). */
   "workspace.createList",
+  /** Create a task in no list, straight into the Inbox (views.md → Inbox). */
+  "workspace.createTask",
   /** See, create and apply the workspace's labels (tasks.md → Labels). */
   "workspace.useLabels",
   /** Rename, merge, recolour and delete labels (Settings → Labels). */
@@ -36,7 +38,14 @@ export type ListAction = (typeof listActions)[number];
 export const sectionActions = ["section.view", "section.update", "section.delete"] as const;
 export type SectionAction = (typeof sectionActions)[number];
 
-export type Action = WorkspaceAction | ListAction | SectionAction;
+/**
+ * Tasks outside any list (Inbox-only tasks, M4.1). A task in a list has no subject of its own:
+ * the API resolves `task.view`/`task.edit` to `list.view`/`list.edit` on its home list.
+ */
+export const taskActions = ["task.view", "task.edit"] as const;
+export type TaskAction = (typeof taskActions)[number];
+
+export type Action = WorkspaceAction | ListAction | SectionAction | TaskAction;
 
 export type WorkspaceRole = "owner" | "member";
 export type WorkspaceKind = "personal" | "team";
@@ -65,7 +74,23 @@ export interface SectionSubject {
   isDefault: boolean;
 }
 
-export type Subject = WorkspaceSubject | ListSubject | SectionSubject;
+/**
+ * What the caller is to a task that lives in no list, resolved through its top-level task.
+ * Only the creator exists until assigning (M7.3) adds the assignee.
+ */
+export type TaskRole = "creator";
+export interface TaskSubject {
+  type: "task";
+  role: TaskRole | null;
+}
+
+/** The list action a task action means for a task that lives in a list. */
+export const listActionForTask: Record<TaskAction, ListAction> = {
+  "task.view": "list.view",
+  "task.edit": "list.edit",
+};
+
+export type Subject = WorkspaceSubject | ListSubject | SectionSubject | TaskSubject;
 
 type Matrix = Record<WorkspaceKind, Record<WorkspaceRole, readonly WorkspaceAction[]>>;
 
@@ -81,6 +106,7 @@ const workspaceMatrix: Matrix = {
       "workspace.update",
       "workspace.uploadFile",
       "workspace.createList",
+      "workspace.createTask",
       "workspace.useLabels",
       "workspace.manageLabels",
     ],
@@ -94,6 +120,7 @@ const workspaceMatrix: Matrix = {
       "workspace.manageMembers",
       "workspace.uploadFile",
       "workspace.createList",
+      "workspace.createTask",
       "workspace.useLabels",
       "workspace.manageLabels",
     ],
@@ -102,6 +129,7 @@ const workspaceMatrix: Matrix = {
       "workspace.view",
       "workspace.uploadFile",
       "workspace.createList",
+      "workspace.createTask",
       "workspace.useLabels",
       "workspace.manageLabels",
     ],
@@ -110,6 +138,10 @@ const workspaceMatrix: Matrix = {
 
 const listMatrix: Record<ListRole, readonly ListAction[]> = {
   creator: ["list.view", "list.edit", "list.manage"],
+};
+
+const taskMatrix: Record<TaskRole, readonly TaskAction[]> = {
+  creator: ["task.view", "task.edit"],
 };
 
 /** Whether the subject can see the resource at all. */
@@ -122,6 +154,8 @@ export function canSee(subject: Subject): boolean {
       return can("list.view", subject);
     case "section":
       return true;
+    case "task":
+      return can("task.view", subject);
   }
 }
 
@@ -135,6 +169,8 @@ export function can(action: Action, subject: Subject): boolean {
     case "section":
       if (action === "section.delete") return !subject.isDefault;
       return (sectionActions as readonly Action[]).includes(action);
+    case "task":
+      return (taskMatrix[subject.role] as readonly Action[]).includes(action);
   }
 }
 

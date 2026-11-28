@@ -47,8 +47,12 @@ type Queued = { op: "upsert"; fields: BlockFields; full: boolean } | { op: "dele
 
 export interface BlockStoreOptions {
   qc: QueryClient;
+  /** The page's id: the list's, or on a task page (Inbox-only task, M4.1) the task's. */
   listId: string;
-  rootListId: string;
+  /** Null on a task page. */
+  rootListId: string | null;
+  /** A list page (default) or the body page of a task in no list. */
+  pageKind?: BlockContainer["type"];
   userId?: string | null;
   send?: (listId: string, input: BlockBatch, options?: ApiOptions) => Promise<BlockBatchResult>;
   /** Resolves when the list exists on the server (a just-created list may still be saving). */
@@ -193,8 +197,9 @@ function isTransient(err: unknown): boolean {
  */
 export class BlockStore {
   readonly listId: string;
+  readonly pageKind: BlockContainer["type"];
   private readonly qc: QueryClient;
-  private readonly rootListId: string;
+  private readonly rootListId: string | null;
   private readonly userId: string | null;
   private readonly send: NonNullable<BlockStoreOptions["send"]>;
   private readonly onError: (err: unknown) => void;
@@ -215,8 +220,9 @@ export class BlockStore {
     this.qc = options.qc;
     this.listId = options.listId;
     this.rootListId = options.rootListId;
+    this.pageKind = options.pageKind ?? "list";
     this.userId = options.userId ?? null;
-    this.send = options.send ?? blocksApi.batch;
+    this.send = options.send ?? (this.pageKind === "list" ? blocksApi.batch : blocksApi.taskBatch);
     this.onError = options.onError ?? (() => undefined);
     this.ready = options.ready ?? (() => Promise.resolve());
     this.typingDelayMs = options.typingDelayMs ?? 500;
@@ -275,7 +281,7 @@ export class BlockStore {
       if (!type || !position) throw new Error("A new block needs a type and a position");
       const base: Block = prev ?? {
         id: op.id,
-        containerType: "list",
+        containerType: this.pageKind,
         containerId: this.listId,
         rootListId: this.rootListId,
         type,
@@ -406,9 +412,13 @@ export class BlockStore {
   }
 
   /** A live delete. A block with queued local changes stays (our upsert will restore it). */
-  receiveDelete(id: string): void {
+  /** A live delete applies to versions up to `version` (a newer row moved here stays). */
+  receiveDelete(id: string, version = Number.MAX_SAFE_INTEGER): void {
     if (this.queued.get(id)?.op === "upsert") return;
-    this.qc.setQueryData<Block[]>(blocksKey(this.listId), (old) => old && removeBlock(old, id));
+    this.qc.setQueryData<Block[]>(
+      blocksKey(this.listId),
+      (old) => old && dropUpTo(old, id, version),
+    );
   }
 
   /** Stops the timer; the caller should `flush()` first if it wants pending changes saved. */
@@ -463,6 +473,12 @@ export class BlockStore {
   }
 }
 
+/** Removes block `id` unless the cached row is newer than the delete (it moved here since). */
+function dropUpTo(rows: Block[], id: string, version: number): Block[] {
+  const row = rows.find((b) => b.id === id);
+  return row && row.version <= version ? removeBlock(rows, id) : rows;
+}
+
 /** Stores of the lists open in this tab, so live events reach the one that owns the cache. */
 const stores = new Map<string, BlockStore>();
 
@@ -482,14 +498,17 @@ export type BlockChangeEvent = ChangeEvent & { entity: "block" };
 
 /** Applies a live block event (called from `applyChange`). */
 /**
- * The list page whose cache holds `block`: its list, or for a task body the page that holds
- * the task's block (or the block itself, before a move). Null when no open page has it.
+ * The page whose cache holds `block`: its list, or for a task body the page that holds the
+ * task's block (or the block itself, before a move), or the task page of that task. Null when
+ * no open page has it.
  */
 function pageOf(qc: QueryClient, block: Block): string | null {
   if (block.containerType === "list") return block.containerId;
   for (const [key, rows] of qc.getQueriesData<Block[]>({ queryKey: ["blocks"] })) {
     const listId = key[1];
     if (typeof listId !== "string" || !rows) continue;
+    // A task page is keyed by its top-level task, whose body holds the block directly.
+    if (listId === block.containerId) return listId;
     if (rows.some((b) => b.taskId === block.containerId || b.id === block.id)) return listId;
   }
   return null;
@@ -516,7 +535,7 @@ export function applyBlockChange(qc: QueryClient, event: BlockChangeEvent): void
     const listId = key[1];
     if (typeof listId !== "string") continue;
     const store = stores.get(listId);
-    if (store) store.receiveDelete(event.id);
-    else qc.setQueryData<Block[]>(key, (old) => old && removeBlock(old, event.id));
+    if (store) store.receiveDelete(event.id, event.version);
+    else qc.setQueryData<Block[]>(key, (old) => old && dropUpTo(old, event.id, event.version));
   }
 }

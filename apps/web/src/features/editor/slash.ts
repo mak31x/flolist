@@ -24,12 +24,20 @@ export const SLASH_ITEMS: readonly SlashItem[] = [
   { type: "attachment", label: "editor.type.attachment", aliases: ["file", "upload", "pdf"] },
 ];
 
-/** Items whose label or an alias contains the query (case-insensitive), labels first. */
-export function filterSlashItems(query: string, label: (key: MessageKey) => string): SlashItem[] {
+/**
+ * Items whose label or an alias contains the query (case-insensitive), labels first. Task
+ * bodies can't hold sublists, so `inTask` leaves Sublist out.
+ */
+export function filterSlashItems(
+  query: string,
+  label: (key: MessageKey) => string,
+  inTask = false,
+): SlashItem[] {
   const q = query.trim().toLowerCase();
-  if (q === "") return [...SLASH_ITEMS];
-  const byLabel = SLASH_ITEMS.filter((item) => label(item.label).toLowerCase().includes(q));
-  const byAlias = SLASH_ITEMS.filter(
+  const items = inTask ? SLASH_ITEMS.filter((item) => item.type !== "sublist") : SLASH_ITEMS;
+  if (q === "") return [...items];
+  const byLabel = items.filter((item) => label(item.label).toLowerCase().includes(q));
+  const byAlias = items.filter(
     (item) => !byLabel.includes(item) && item.aliases.some((a) => a.includes(q)),
   );
   return [...byLabel, ...byAlias];

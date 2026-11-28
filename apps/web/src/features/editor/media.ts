@@ -180,6 +180,9 @@ export async function insertFiles(
  * can show and rename it, and its title field gets focus.
  */
 export function insertSublist(ctx: KeyContext, anchor: Block | null, replace: boolean): void {
+  // Only list pages hold sublists (the slash menu hides it elsewhere).
+  const rootListId = ctx.rootListId;
+  if (!rootListId) return;
   const id = uuidv7();
   const sublistId = uuidv7();
   const parent = ctx.qc.getQueryData<ListIndexItem | null>(listKey(ctx.listId));
@@ -187,7 +190,7 @@ export function insertSublist(ctx: KeyContext, anchor: Block | null, replace: bo
   const list: ListIndexItem = {
     id: sublistId,
     workspaceId: parent?.workspaceId ?? "",
-    rootListId: ctx.rootListId,
+    rootListId,
     parentListId: ctx.listId,
     parentBlockId: id,
     title: "",

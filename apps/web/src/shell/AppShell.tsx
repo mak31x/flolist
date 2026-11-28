@@ -2,7 +2,16 @@ import { DateSuggestionPopup } from "../features/properties/DateSuggestionPopup.
 import { MoveToListDialog } from "../features/tasks/MoveToListDialog.tsx";
 import { Dialog, IconButton, SheetContent, brand } from "@flolist/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Link, Navigate, Outlet, useLocation, useMatches, useParams } from "@tanstack/react-router";
+import {
+  Link,
+  Navigate,
+  Outlet,
+  useLocation,
+  useMatches,
+  useParams,
+  useSearch,
+} from "@tanstack/react-router";
+import type { PanelTask } from "./panel-task.ts";
 import { Bell, Menu as MenuIcon, PanelLeft, PanelRightOpen, Plus, Search } from "lucide-react";
 import { meQuery } from "../features/auth/api.ts";
 import { useServerThemeSync } from "../features/auth/hooks.ts";
@@ -45,8 +54,15 @@ function Shell() {
   const matches = useMatches();
   const mode = matches.at(-1)?.staticData.panel ?? noPanel;
   const params = useParams({ strict: false });
-  const task =
-    params.listId && params.taskId ? { listId: params.listId, taskId: params.taskId } : null;
+  const search = useSearch({ strict: false });
+  const location = useLocation();
+  const task: PanelTask | null = !params.taskId
+    ? null
+    : params.listId
+      ? { from: "list", listId: params.listId, taskId: params.taskId }
+      : location.pathname.startsWith("/today")
+        ? { from: "today", taskId: params.taskId, date: search.date }
+        : { from: "inbox", taskId: params.taskId };
 
   const sidebarCollapsed = useShell((s) => s.sidebarCollapsed);
   const toggleSidebar = useShell((s) => s.toggleSidebar);

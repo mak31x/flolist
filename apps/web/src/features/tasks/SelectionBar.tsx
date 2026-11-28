@@ -16,6 +16,7 @@ import {
   CopyPlus,
   FileText,
   FolderInput,
+  Inbox,
   Link2,
   Tag,
   Trash2,
@@ -37,8 +38,8 @@ function commonLabels(tasks: readonly Block[]): string[] {
 
 /**
  * The floating action bar of a multiselection (views.md → Multiselect): Move to list, Set due
- * date, Label, Duplicate, Copy, Mark complete, Delete. Assign joins in M7.3, Add to / Remove
- * from Inbox in M4.1. It lives inside the editor (fixed to the viewport), so focus moving into
+ * date, Add to / Remove from Inbox (M4.1), Label, Duplicate, Copy, Mark complete, Delete.
+ * Assign joins in M7.3. It lives inside the editor (fixed to the viewport), so focus moving into
  * it keeps the selection; its popovers carry `data-keep-selection` for the same reason.
  */
 export function SelectionBar({
@@ -54,6 +55,7 @@ export function SelectionBar({
   const [dueOpen, setDueOpen] = useState(false);
   const allDone = tasks.length > 0 && tasks.every((b) => b.task?.completedAt != null);
   const labels = commonLabels(tasks);
+  const inInbox = tasks.every((b) => b.taskId && host.inbox?.has(b.taskId));
 
   return (
     <div
@@ -72,6 +74,16 @@ export function SelectionBar({
           runTaskAction("move", selected, host);
         }}
       />
+      {host.inbox && tasks.length > 0 && (
+        <IconButton
+          label={t(inInbox ? "tasks.actions.removeFromInbox" : "tasks.actions.addToInbox")}
+          icon={<Inbox />}
+          {...(inInbox ? {} : { shortcut: "Mod+Shift+I" })}
+          onClick={() => {
+            runTaskAction(inInbox ? "removeFromInbox" : "addToInbox", selected, host);
+          }}
+        />
+      )}
       <Popover open={dueOpen} onOpenChange={setDueOpen}>
         <PopoverTrigger asChild>
           <IconButton

@@ -16,6 +16,7 @@ import {
   type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
+import { useOptimistic, type Snapshot } from "../../lib/optimistic.ts";
 import { meQuery } from "../auth/api.ts";
 import { blocksKey } from "../editor/api.ts";
 import { mutationKeys } from "../sync/apply-change.ts";
@@ -32,45 +33,6 @@ import {
   upsertList,
   upsertSection,
 } from "./cache.ts";
-
-type Snapshot = [QueryKey, unknown][];
-
-/**
- * The optimistic pattern every list/sidebar action uses (CLAUDE.md → Optimistic UI): patch the
- * cache at once, roll back and toast on error, and refetch the touched queries once the last
- * pending mutation with the same key settles (which also picks up live events skipped
- * meanwhile, see `applyChange`).
- */
-function useOptimistic<V, R>(options: {
-  mutationKey: QueryKey;
-  touches: (vars: V) => QueryKey[];
-  apply: (qc: QueryClient, vars: V) => void;
-  run: (vars: V) => Promise<R>;
-  error: string;
-}) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationKey: options.mutationKey,
-    mutationFn: options.run,
-    onMutate: async (vars: V) => {
-      const keys = options.touches(vars);
-      await Promise.all(keys.map((queryKey) => qc.cancelQueries({ queryKey })));
-      const snapshot: Snapshot = keys.map((k) => [k, qc.getQueryData(k)]);
-      options.apply(qc, vars);
-      return { snapshot };
-    },
-    onError: (_err, _vars, ctx) => {
-      for (const [key, data] of ctx?.snapshot ?? []) qc.setQueryData(key, data);
-      toast(options.error);
-    },
-    onSettled: async (_data, _err, vars) => {
-      if (qc.isMutating({ mutationKey: options.mutationKey }) > 1) return;
-      await Promise.all(
-        options.touches(vars).map((queryKey) => qc.invalidateQueries({ queryKey })),
-      );
-    },
-  });
-}
 
 const getSidebar = (qc: QueryClient) => qc.getQueryData<Sidebar>(sidebarKey);
 

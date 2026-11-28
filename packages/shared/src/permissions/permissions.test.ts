@@ -7,6 +7,8 @@ import {
   permissionFixtures,
   sectionActions,
   sectionPermissionFixtures,
+  taskActions,
+  taskPermissionFixtures,
   workspaceActions,
 } from "./index.ts";
 
@@ -73,6 +75,23 @@ describe("list and section matrix", () => {
         expect(
           sectionPermissionFixtures.some((f) => f.action === action && f.setup.actorRole === role),
           `section/${role}/${action}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  const taskCases = taskPermissionFixtures.filter((f) => !f.setup.task.deleted);
+  it.each(taskCases.map((f) => [f.name, f] as const))("%s", (_name, f) => {
+    const role = f.setup.actorRole === "none" ? null : f.setup.actorRole;
+    expect(decide(f.action, { type: "task", role })).toBe(f.expected);
+  });
+
+  it("covers every task action for every role", () => {
+    for (const role of ["creator", "none"] as const) {
+      for (const action of taskActions) {
+        expect(
+          taskPermissionFixtures.some((f) => f.action === action && f.setup.actorRole === role),
+          `task/${role}/${action}`,
         ).toBe(true);
       }
     }

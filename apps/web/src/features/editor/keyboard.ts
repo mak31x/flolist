@@ -40,8 +40,10 @@ export interface BlockSelection {
 }
 
 export interface KeyContext {
+  /** The page's id (a list, or the top-level task of a task page). */
   listId: string;
-  rootListId: string;
+  /** Null on a task page. */
+  rootListId: string | null;
   /** Where uploads go (the list's workspace; a just-created list may still be saving). */
   workspaceId: () => Promise<string>;
   qc: QueryClient;

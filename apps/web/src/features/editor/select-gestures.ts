@@ -93,3 +93,7 @@ export function useSelectGestures(
     onTouchCancel: cancel,
   };
 }
+
+/** Touch-first devices get long-press selection instead of the long-press context menu. */
+export const coarsePointer = () =>
+  typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;

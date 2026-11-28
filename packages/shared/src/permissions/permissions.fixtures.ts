@@ -16,6 +16,8 @@ import type {
   ListAction,
   ListRole,
   SectionAction,
+  TaskAction,
+  TaskRole,
   WorkspaceAction,
   WorkspaceKind,
   WorkspaceRole,
@@ -102,6 +104,24 @@ export const permissionFixtures: readonly PermissionFixture[] = [
     "team",
     "none",
     "workspace.createList",
+    "not_found",
+  ),
+  // Inbox tasks (M4.1).
+  ws("personal owner creates inbox tasks", "personal", "owner", "workspace.createTask", "allow"),
+  ws(
+    "stranger can't create tasks in a personal ws",
+    "personal",
+    "none",
+    "workspace.createTask",
+    "not_found",
+  ),
+  ws("team owner creates inbox tasks", "team", "owner", "workspace.createTask", "allow"),
+  ws("team member creates inbox tasks", "team", "member", "workspace.createTask", "allow"),
+  ws(
+    "non-member can't create tasks in a team",
+    "team",
+    "none",
+    "workspace.createTask",
     "not_found",
   ),
   // Labels (M3.2).
@@ -208,9 +228,46 @@ export const sectionPermissionFixtures: readonly SectionPermissionFixture[] = [
   section("stranger can't delete a section", "none", false, "section.delete", "not_found"),
 ];
 
+/**
+ * Cases for tasks that live in no list (Inbox-only). `actorRole` grows with assigning (M7.3).
+ * Tasks in a list follow `listPermissionFixtures` through their home list.
+ */
+export interface TaskPermissionFixture {
+  name: string;
+  setup: { task: { deleted?: boolean }; actorRole: TaskRole | "none" };
+  action: TaskAction;
+  resource: { type: "task" };
+  expected: Decision;
+}
+
+const task = (
+  name: string,
+  actorRole: TaskRole | "none",
+  action: TaskAction,
+  expected: Decision,
+  extra: { deleted?: boolean } = {},
+): TaskPermissionFixture => ({
+  name,
+  setup: { task: extra, actorRole },
+  action,
+  resource: { type: "task" },
+  expected,
+});
+
+export const taskPermissionFixtures: readonly TaskPermissionFixture[] = [
+  task("creator views own inbox task", "creator", "task.view", "allow"),
+  task("creator edits own inbox task", "creator", "task.edit", "allow"),
+  task("stranger can't see an inbox task", "none", "task.view", "not_found"),
+  task("stranger can't edit an inbox task", "none", "task.edit", "not_found"),
+  task("deleted inbox task is gone for its creator", "creator", "task.view", "not_found", {
+    deleted: true,
+  }),
+];
+
 /** Every fixture, for name-uniqueness checks. */
 export const allPermissionFixtures: readonly { name: string; action: Action }[] = [
   ...permissionFixtures,
   ...listPermissionFixtures,
   ...sectionPermissionFixtures,
+  ...taskPermissionFixtures,
 ];
